@@ -62,10 +62,13 @@ def foundry(args: list[str], *, capture: bool = True, check: bool = True) -> str
         if check and proc.returncode != 0:
             raise SystemExit(f"foundry {' '.join(args)} failed with exit code {proc.returncode}.")
         return ""
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # The CLI draws box-art tables, and on Windows Python would otherwise decode
+    # that as cp1252 and raise UnicodeDecodeError before we see any output.
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
     if check and proc.returncode != 0:
         raise SystemExit(f"foundry {' '.join(args)} failed:\n{proc.stderr.strip() or proc.stdout.strip()}")
-    return proc.stdout
+    return proc.stdout or ""
 
 
 def running_endpoint() -> str | None:
@@ -112,16 +115,39 @@ def ensure_model(model: str) -> None:
 
 
 def resolve_served_model(endpoint: str, alias: str) -> str:
-    """Map a catalogue alias onto the variant id the server answers to."""
+    """Map a catalogue alias onto the variant id the server answers to.
+
+    /v1/models lists what is *cached*, and the ids there are hardware variants
+    ("qwen2.5-0.5b" is served as "qwen2.5-0.5b-instruct-openvino-npu" on a
+    machine with an NPU). The variant id is what has to go in the request body,
+    which is why this lookup exists rather than passing the alias straight
+    through. The "parent" field carries the alias, so match on either.
+    """
     models = httpx.get(f"{endpoint}/v1/models", timeout=10.0).json()
-    ids = [m["id"] for m in models.get("data", [])]
-    if not ids:
-        raise SystemExit(f"{endpoint}/v1/models returned no models. Load one with: foundry model run {alias}")
-    for model_id in ids:
-        if model_id == alias or model_id.startswith(alias):
-            return model_id
+    entries = models.get("data", [])
+    if not entries:
+        raise SystemExit(f"{endpoint}/v1/models returned no models. Download one with: foundry model download {alias}")
+    for entry in entries:
+        if entry.get("parent") == alias or entry["id"] == alias:
+            return entry["id"]
+    for entry in entries:
+        if entry["id"].startswith(alias):
+            return entry["id"]
+    ids = [e["id"] for e in entries]
     print(f"[warn] No served model matched {alias!r}. Available: {', '.join(ids)}")
     return ids[0]
+
+
+def load_model(model: str) -> None:
+    """Make the model resident in the daemon.
+
+    Cached is not the same as loaded. A model that is present on disk but not
+    resident returns HTTP 400 "Model ... is not loaded" from
+    /v1/chat/completions, which reads like a malformed request rather than a
+    missing warm-up step.
+    """
+    print(f"[info] Loading {model} into the daemon")
+    foundry(["model", "load", model], capture=False)
 
 
 def smoke_test(endpoint: str, model: str) -> None:
@@ -206,6 +232,7 @@ def main() -> int:
     served = resolve_served_model(endpoint, alias)
     if served != alias:
         print(f"[info] Alias {alias!r} is served as {served!r} on this hardware")
+    load_model(served)
     smoke_test(endpoint, served)
 
     update_env({

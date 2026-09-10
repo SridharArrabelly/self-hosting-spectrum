@@ -104,7 +104,7 @@ def ensure_tunnel(port: int, anonymous: bool) -> None:
 
 
 def tunnel_url(port: int) -> str:
-    proc = devtunnel(["show", TUNNEL_ID, "-o", "json"])
+    proc = devtunnel(["show", TUNNEL_ID, "--json"])
     try:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
@@ -120,11 +120,18 @@ def tunnel_url(port: int) -> str:
             if url:
                 return url.rstrip("/")
 
-    # Dev Tunnels URLs are deterministic: <tunnel-id>-<port>.<cluster>.devtunnels.ms
-    host = tunnel.get("tunnelId") or TUNNEL_ID
+    # Dev Tunnels URLs are deterministic, and the cluster is the suffix of the
+    # tunnel id: "shs-foundry-local.inc1" is hosted in cluster "inc1" and
+    # published at https://shs-foundry-local-39839.inc1.devtunnels.ms.
+    # `devtunnel show --json` does not return the URL itself, so derive it.
+    raw_id = tunnel.get("tunnelId") or TUNNEL_ID
     cluster = tunnel.get("clusterId")
+    name = raw_id
+    if "." in raw_id:
+        name, _, suffix = raw_id.partition(".")
+        cluster = cluster or suffix
     if cluster:
-        return f"https://{host}-{port}.{cluster}.devtunnels.ms"
+        return f"https://{name}-{port}.{cluster}.devtunnels.ms"
     raise SystemExit(f"Could not determine the tunnel URL from:\n{proc.stdout}")
 
 
