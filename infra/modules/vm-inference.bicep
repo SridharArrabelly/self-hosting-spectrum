@@ -48,7 +48,8 @@ param adminPublicKey string
 
 @description('Optional CIDR allowed to SSH. Leave empty to create no SSH rule at all.')
 param sshSourceAddressPrefix string = ''
-
+@description('Public IPs the APIM gateway calls backends from. See the NSG rule below for why the ApiManagement service tag is the wrong answer here.')
+param apimOutboundIpAddresses array
 @description('Tags applied to every resource.')
 param tags object = {}
 
@@ -72,8 +73,13 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
             protocol: 'Tcp'
             sourcePortRange: '*'
             destinationPortRange: string(inferencePort)
-            // Region-scoped service tag covering APIM public IPs.
-            sourceAddressPrefix: 'ApiManagement'
+            // The ApiManagement service tag covers the *inbound management*
+            // endpoints of APIM, not the address a gateway calls a backend
+            // from. Using the tag here looks right and silently fails: the
+            // gateway request times out and APIM reports a bare HTTP 500.
+            // A non-VNet APIM egresses from its own instance public IP, so
+            // that exact address is what has to be allowed.
+            sourceAddressPrefixes: apimOutboundIpAddresses
             destinationAddressPrefix: '*'
             access: 'Allow'
             priority: 100

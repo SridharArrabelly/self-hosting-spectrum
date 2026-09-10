@@ -51,13 +51,13 @@
       return value;
   }" />
   <choose>
-    <when condition="@(!string.Equals(context.Variables.GetValueOrDefault<string>("credential", string.Empty), "{{spectrum-gateway-key}}", StringComparison.Ordinal))">
+    <when condition="@(!string.Equals((string)context.Variables["credential"], "{{spectrum-gateway-key}}", StringComparison.Ordinal))">
       <return-response>
         <set-status code="401" reason="Unauthorized" />
         <set-header name="Content-Type" exists-action="override">
           <value>application/json</value>
         </set-header>
-        <set-body>{"error":{"code":"Unauthorized","message":"Supply the gateway key as Ocp-Apim-Subscription-Key, api-key, or Authorization: Bearer <key>."}}</set-body>
+        <set-body>{"error":{"code":"Unauthorized","message":"Supply the gateway key as Ocp-Apim-Subscription-Key, api-key, or Authorization: Bearer [key]."}}</set-body>
       </return-response>
     </when>
   </choose>

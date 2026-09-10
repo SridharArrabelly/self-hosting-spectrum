@@ -170,7 +170,7 @@ def main() -> int:
     group.add_argument("--option", type=int, choices=sorted(OPTIONS), help="Which hosting option to call.")
     group.add_argument("--all", action="store_true", help="Call all four in sequence and compare.")
     parser.add_argument("--prompt", default=DEFAULT_PROMPT, help="The question to ask.")
-    parser.add_argument("--max-tokens", type=int, default=200, help="Response length cap.")
+    parser.add_argument("--max-tokens", type=int, default=512, help="Response length cap.")
     parser.add_argument("--timeout", type=float, default=180.0, help="Per-request timeout in seconds.")
     parser.add_argument("--verbose", action="store_true", help="Show per-option notes on failure.")
     args = parser.parse_args()

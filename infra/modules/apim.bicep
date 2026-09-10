@@ -144,6 +144,8 @@ output apimName string = apim.name
 output apimId string = apim.id
 output gatewayUrl string = apim.properties.gatewayUrl
 output apimPrincipalId string = apim.identity.principalId
+@description('The addresses this gateway egresses from. NSGs in front of a backend must allow these explicitly - the ApiManagement service tag does not cover gateway-to-backend traffic.')
+output outboundIpAddresses array = apim.properties.publicIPAddresses
 output loggerId string = apimLogger.id
 output appInsightsName string = appInsights.name
 output appInsightsId string = appInsights.id

@@ -140,6 +140,7 @@ module vm 'modules/vm-inference.bicep' = if (deployVm) {
     adminUsername: vmAdminUsername
     adminPublicKey: vmAdminPublicKey
     sshSourceAddressPrefix: vmSshSourceAddressPrefix
+    apimOutboundIpAddresses: apim.outputs.outboundIpAddresses
     tags: tags
   }
 }

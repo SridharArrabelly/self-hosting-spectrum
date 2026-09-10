@@ -38,6 +38,13 @@ write_files:
       #!/usr/bin/env bash
       set -euxo pipefail
 
+      # cloud-init runs this with no HOME, and the ollama CLI panics without it
+      # ("$HOME is not defined") when it resolves the model directory. The
+      # daemon is unaffected, so this fails in a confusing way: the service is
+      # healthy and listening, but no model was ever pulled and every request
+      # 404s. Set it explicitly.
+      export HOME=/root
+
       RUNTIME="__RUNTIME__"
       MODEL="__MODEL__"
 
