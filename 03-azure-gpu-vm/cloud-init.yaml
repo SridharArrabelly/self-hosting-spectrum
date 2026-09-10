@@ -1,0 +1,134 @@
+#cloud-config
+# ---------------------------------------------------------------------------
+# Option 3 - bootstrap a customer-managed inference server.
+#
+# __RUNTIME__ and __MODEL__ are substituted by infra/modules/vm-inference.bicep
+# before this file is base64-encoded into the VM's customData.
+#
+#   ollama : CPU or GPU, llama.cpp under the hood, OpenAI API on :11434/v1
+#   vllm   : GPU only (SM75+), containerised, OpenAI API on :8000/v1
+#
+# Progress:  ssh in, then  sudo cloud-init status --wait
+# Logs:      /var/log/cloud-init-output.log
+# ---------------------------------------------------------------------------
+
+package_update: true
+package_upgrade: false
+
+packages:
+  - curl
+  - jq
+  - ca-certificates
+
+write_files:
+  # Bind Ollama to all interfaces. By default it listens on 127.0.0.1 only,
+  # which would make it unreachable from APIM. The NSG - not the bind address -
+  # is what keeps this private.
+  - path: /etc/systemd/system/ollama.service.d/override.conf
+    permissions: '0644'
+    content: |
+      [Service]
+      Environment="OLLAMA_HOST=0.0.0.0:11434"
+      Environment="OLLAMA_KEEP_ALIVE=-1"
+      Environment="OLLAMA_NUM_PARALLEL=2"
+
+  - path: /opt/spectrum/install.sh
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+
+      RUNTIME="__RUNTIME__"
+      MODEL="__MODEL__"
+
+      echo "=== self-hosting-spectrum: installing ${RUNTIME} serving ${MODEL} ==="
+
+      if [ "${RUNTIME}" = "ollama" ]; then
+        curl -fsSL https://ollama.com/install.sh | sh
+
+        systemctl daemon-reload
+        systemctl enable --now ollama
+
+        # Wait for the API before pulling, otherwise the pull races the daemon.
+        for i in $(seq 1 60); do
+          curl -sf http://127.0.0.1:11434/api/version >/dev/null && break
+          sleep 2
+        done
+
+        ollama pull "${MODEL}"
+
+        # Warm the model so the first request through APIM is not a cold start.
+        curl -sf http://127.0.0.1:11434/v1/chat/completions \
+          -H 'Content-Type: application/json' \
+          -d "{\"model\":\"${MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}" \
+          >/dev/null || true
+
+      elif [ "${RUNTIME}" = "vllm" ]; then
+        # Docker
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+          -o /etc/apt/keyrings/docker.asc
+        chmod a+r /etc/apt/keyrings/docker.asc
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+          > /etc/apt/sources.list.d/docker.list
+        apt-get update -y
+        apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+        # NVIDIA driver + container toolkit
+        apt-get install -y ubuntu-drivers-common
+        ubuntu-drivers install --gpgpu || apt-get install -y nvidia-driver-550-server
+
+        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+          | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+        curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+          | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+          > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+        apt-get update -y
+        apt-get install -y nvidia-container-toolkit
+        nvidia-ctk runtime configure --runtime=docker
+        systemctl restart docker
+
+        MODEL="${MODEL}" docker compose -f /opt/spectrum/docker-compose.yml up -d
+
+      else
+        echo "Unknown runtime '${RUNTIME}'" >&2
+        exit 1
+      fi
+
+      echo "=== ready: ${RUNTIME} ==="
+
+  - path: /opt/spectrum/docker-compose.yml
+    permissions: '0644'
+    content: |
+      # Used only when runtime=vllm. Requires an SM75+ GPU (T4, A10, A100, H100).
+      # A V100 (NC6s_v3) will NOT work with current vLLM - use runtime=ollama.
+      services:
+        vllm:
+          image: vllm/vllm-openai:latest
+          restart: unless-stopped
+          ports:
+            - "8000:8000"
+          environment:
+            - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+          command:
+            - --model
+            - ${MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --max-model-len
+            - "8192"
+          deploy:
+            resources:
+              reservations:
+                devices:
+                  - driver: nvidia
+                    count: all
+                    capabilities: [gpu]
+          ipc: host
+
+runcmd:
+  - [ bash, /opt/spectrum/install.sh ]
+
+final_message: "self-hosting-spectrum inference host ready after $UPTIME seconds"
