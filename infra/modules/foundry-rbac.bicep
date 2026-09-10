@@ -22,6 +22,15 @@ param accountName string
 @description('Principal IDs granted data-plane access, e.g. the APIM managed identity.')
 param principalIds array
 
+@description('''
+Human/developer principal IDs (principalType User) granted the same data-plane
+access. Needed because creating and running a Foundry agent - shared/agent.py -
+is a data-plane write (accounts/AIServices/agents/write). Subscription
+Contributor does not include it: control-plane ownership of the account does not
+imply the right to invoke or author things inside it.
+''')
+param userPrincipalIds array = []
+
 @description('Principal type, so role assignment does not fail on AAD replication lag.')
 param principalType string = 'ServicePrincipal'
 
@@ -50,6 +59,21 @@ resource assignments 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', pair.roleId)
       principalId: pair.principalId
       principalType: principalType
+    }
+  }
+]
+
+resource userAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
+  for pair in flatten(map(userPrincipalIds, principalId => map(roleIds, roleId => {
+    principalId: principalId
+    roleId: roleId
+  }))): {
+    name: guid(account.id, pair.principalId, pair.roleId)
+    scope: account
+    properties: {
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', pair.roleId)
+      principalId: pair.principalId
+      principalType: 'User'
     }
   }
 ]

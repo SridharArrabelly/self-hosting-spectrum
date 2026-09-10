@@ -243,6 +243,72 @@ resource listModels 'Microsoft.ApiManagement/service/apis/operations@2024-05-01'
   }
 ]
 
+// Foundry Agent Service does not just forward a BYOM request. Its model gateway
+// first probes GET <connection-target>/deployments/<model-name> to validate that
+// the deployment exists, in the shape Azure OpenAI would answer. A route that
+// only implements /chat/completions returns 404 to that probe, and the agent run
+// fails with "Model gateway error: Upstream gateway returned NotFound" - which
+// points at the model, not at a missing discovery endpoint.
+//
+// None of the four backends here are Azure OpenAI, so none of them can answer
+// it. The gateway synthesises the response instead: the route's existence IS the
+// deployment. This is answered entirely in policy and never reaches a backend.
+resource getDeployment 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = [
+  for (api, i) in apiDefinitions: {
+    parent: apis[i]
+    name: 'get-deployment'
+    properties: {
+      displayName: 'Get deployment (Foundry BYOM probe)'
+      method: 'GET'
+      urlTemplate: '/deployments/{deploymentId}'
+      description: 'Deployment-discovery probe issued by Foundry Agent Service before a BYOM run.'
+      templateParameters: [
+        {
+          name: 'deploymentId'
+          type: 'string'
+          required: true
+          description: 'Model name as the agent references it.'
+        }
+      ]
+    }
+  }
+]
+
+resource getDeploymentPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-05-01' = [
+  for (api, i) in apiDefinitions: {
+    parent: getDeployment[i]
+    name: 'policy'
+    properties: {
+      format: 'rawxml'
+      value: loadTextContent('../policies/operation-get-deployment.xml')
+    }
+  }
+]
+
+resource listDeployments 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = [
+  for (api, i) in apiDefinitions: {
+    parent: apis[i]
+    name: 'list-deployments'
+    properties: {
+      displayName: 'List deployments (Foundry BYOM probe)'
+      method: 'GET'
+      urlTemplate: '/deployments'
+      description: 'Deployment-discovery probe issued by Foundry Agent Service before a BYOM run.'
+    }
+  }
+]
+
+resource listDeploymentsPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2024-05-01' = [
+  for (api, i) in apiDefinitions: {
+    parent: listDeployments[i]
+    name: 'policy'
+    properties: {
+      format: 'rawxml'
+      value: loadTextContent('../policies/operation-list-deployments.xml')
+    }
+  }
+]
+
 resource apiPolicies 'Microsoft.ApiManagement/service/apis/policies@2024-05-01' = [
   for (api, i) in apiDefinitions: {
     parent: apis[i]
@@ -260,6 +326,8 @@ resource apiPolicies 'Microsoft.ApiManagement/service/apis/policies@2024-05-01' 
       nvFoundryLocalUrl
       chatCompletions
       listModels
+      getDeployment
+      listDeployments
     ]
   }
 ]

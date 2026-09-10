@@ -43,4 +43,6 @@ desktop.ini
 benchmarks/*.json
 benchmarks/*.csv
 !benchmarks/.gitkeep
+/benchmarks.csv
+/benchmarks.json
 *.log

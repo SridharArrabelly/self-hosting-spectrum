@@ -67,6 +67,15 @@ param fireworksModel string = 'FW-Nemotron-Lightning-3.5-30B-A3B'
 @description('Name of the Fireworks deployment. This is what clients send as "model".')
 param fireworksDeploymentName string = 'fireworks'
 
+@description('''
+Object ID of the human running this deployment. Granted the same Foundry
+data-plane roles as APIM, because creating and running agents (shared/agent.py)
+is a data-plane write that subscription Contributor does not cover. Get it with
+  az ad signed-in-user show --query id -o tsv
+Leave empty to skip the grant.
+''')
+param developerPrincipalId string = ''
+
 var tags = {
   project: 'self-hosting-spectrum'
   managedBy: 'bicep'
@@ -115,6 +124,7 @@ module foundryRbac 'modules/foundry-rbac.bicep' = {
     principalIds: [
       apim.outputs.apimPrincipalId
     ]
+    userPrincipalIds: developerPrincipalId == '' ? [] : [ developerPrincipalId ]
   }
 }
 

@@ -83,7 +83,10 @@ def invoke(client: AIProjectClient, option: Option, prompt: str) -> tuple[str, f
     started = time.perf_counter()
     response = openai_client.responses.create(
         input=prompt,
-        extra_body={"agent": {"name": agent_name(option), "type": "agent_reference"}},
+        # The Responses API takes the agent under 'agent_reference'. An older
+        # preview accepted 'agent'; that spelling now fails with
+        # invalid_payload: "The 'agent' property is deprecated."
+        extra_body={"agent_reference": {"name": agent_name(option), "type": "agent_reference"}},
     )
     elapsed = time.perf_counter() - started
     text = getattr(response, "output_text", None)

@@ -64,6 +64,16 @@ write_files:
 
         ollama pull "${MODEL}"
 
+        # Foundry Agent Service treats the model name as a deployment name and
+        # rejects colons: "Deployment name contains invalid characters. Only
+        # alphanumeric, dots, hyphens, and underscores allowed". Ollama's
+        # name:tag convention always has one, so publish a colon-free alias
+        # alongside it. Both names resolve to the same weights.
+        SAFE_MODEL="$(echo "${MODEL}" | tr ':' '-')"
+        if [ "${SAFE_MODEL}" != "${MODEL}" ]; then
+          ollama cp "${MODEL}" "${SAFE_MODEL}"
+        fi
+
         # Warm the model so the first request through APIM is not a cold start.
         curl -sf http://127.0.0.1:11434/v1/chat/completions \
           -H 'Content-Type: application/json' \

@@ -30,7 +30,11 @@ param modelName string = 'FW-Nemotron-Lightning-3.5-30B-A3B'
 param modelVersion string = '1'
 
 @description('Capacity in thousands of tokens per minute for the pay-as-you-go SKU.')
-param capacity int = 1
+// DataZoneStandard bills per token, so capacity is purely a rate-limit dial and
+// raising it does not raise the bill. It does raise the request ceiling though:
+// capacity 1 yields exactly 1 request/min, which makes back-to-back calls
+// (benchmark.py, client.py --all) fail with HTTP 429 RateLimitReached.
+param capacity int = 50
 
 resource account 'Microsoft.CognitiveServices/accounts@2025-06-01' existing = {
   name: foundryAccountName

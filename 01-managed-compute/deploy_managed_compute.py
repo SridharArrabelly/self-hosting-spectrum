@@ -51,7 +51,32 @@ from shared.config import REPO_ROOT, load_settings  # noqa: E402
 
 ENV_PATH = REPO_ROOT / ".env"
 DEFAULT_DEPLOYMENT_NAME = "managed-compute"
-DEFAULT_MODEL = "azureml://registries/azureml/models/Phi-4-mini-instruct/versions/1"
+
+# Managed Compute will not deploy a bare model. Every model asset carries an
+# AllowedDeploymentTemplates list, and the template - not the model - decides
+# the runtime (vLLM/SGLang/TRT-LLM), the context window, and which accelerator
+# is legal. Ask for an accelerator without a template and you get
+# "DeploymentTemplate must be provided when AcceleratorType is specified";
+# ask for neither and you get "model has no default deployment template
+# (AllowedDeploymentTemplates) to fall back to".
+#
+# Most azureml-registry models (Phi-4-mini-instruct among them) have no
+# managed-compute templates at all - they are serverless assets. The
+# azure-huggingface registry is where the deployable ones live.
+#
+# There is no API that lists templates. The reliable way to discover one is to
+# submit a create with the model and no template and read the error, or copy it
+# from the model card in the Foundry portal. Templates are addressed as:
+#   azureml://registries/<registry>/deploymenttemplates/<name>/labels/latest
+DEFAULT_MODEL = "azureml://registries/azure-huggingface/models/qwen--qwen3.6-27b-fp8/versions/7"
+DEFAULT_TEMPLATE = (
+    "azureml://registries/azure-huggingface/deploymenttemplates/"
+    "qwen--qwen3-6-27b-fp8--256k-nvidia-h100/labels/latest"
+)
+# This template is FP8, and FP8 needs Hopper. Ampere (A100) cannot run it, which
+# is why the cheapest accelerator with free quota is not automatically the right
+# answer here - the template constrains the choice.
+DEFAULT_ACCELERATOR = "H100_80GB"
 ACCELERATOR_PREFERENCE = ["A100_80GB", "MI300_192GB", "H100_80GB", "H200_141GB"]
 
 # Indicative on-demand rates, USD per accelerator-hour. Shown as a warning, not
@@ -132,9 +157,10 @@ def main() -> int:
     )
     parser.add_argument("--name", help=f"Deployment name. Default {DEFAULT_DEPLOYMENT_NAME}.")
     parser.add_argument("--model", help="AzureML asset URI. Overrides MC_MODEL_URI.")
-    parser.add_argument("--template", help="Pin a deployment template URI. Optional - the service picks a default.")
+    parser.add_argument("--template",
+                        help="Deployment template URI. Defaults to the template matching the default model.")
     parser.add_argument("--accelerator", choices=ACCELERATOR_PREFERENCE,
-                        help="Accelerator family. Defaults to the cheapest with free quota.")
+                        help="Accelerator family. Must be one the template supports.")
     parser.add_argument("--instances", type=int, default=1, help="Instance count (sku.capacity).")
     parser.add_argument("--delete", action="store_true", help="Delete the deployment and stop the billing.")
     parser.add_argument("--status", action="store_true", help="Show current state and exit.")
@@ -164,17 +190,29 @@ def main() -> int:
         return 0
 
     model = args.model or settings.raw.get("MC_MODEL_URI") or DEFAULT_MODEL
-    accelerator = args.accelerator or pick_accelerator(mgmt, settings.location)
+    template = args.template or settings.raw.get("MC_TEMPLATE_URI") or (
+        DEFAULT_TEMPLATE if model == DEFAULT_MODEL else None
+    )
+    accelerator = args.accelerator or settings.raw.get("MC_ACCELERATOR") or (
+        DEFAULT_ACCELERATOR if model == DEFAULT_MODEL else pick_accelerator(mgmt, settings.location)
+    )
     hourly = INDICATIVE_HOURLY.get(accelerator)
+
+    if not template:
+        print(f"[warn] No deployment template for {model}.")
+        print("       Managed Compute requires one whenever an accelerator is set, and")
+        print("       most azureml-registry models have no managed-compute template at all.")
+        print("       Copy the template from the model card in the Foundry portal, or pass")
+        print("       --template azureml://registries/<registry>/deploymenttemplates/<name>/labels/latest")
+        return 1
 
     print("Option 1 - Foundry Managed Compute")
     print(f"  account     : {account}")
     print(f"  deployment  : {name}")
     print(f"  model       : {model}")
+    print(f"  template    : {template}")
     print(f"  accelerator : {accelerator}")
     print(f"  instances   : {args.instances}")
-    if args.template:
-        print(f"  template    : {args.template}")
     if hourly:
         print(f"\n  COST: about ${hourly:.2f} per accelerator-hour, roughly "
               f"${hourly * 24:.0f}/day, billed with zero traffic.")
@@ -190,9 +228,8 @@ def main() -> int:
     properties = ManagedComputeDeploymentProperties(
         model=model,
         accelerator_type=accelerator,
+        deployment_template=template,
     )
-    if args.template:
-        properties.deployment_template = args.template
 
     resource = ManagedComputeDeployment(
         properties=properties,

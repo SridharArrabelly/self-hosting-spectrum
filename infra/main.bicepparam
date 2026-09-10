@@ -19,6 +19,9 @@ param publisherName = readEnvironmentVariable('APIM_PUBLISHER_NAME', 'Self Hosti
 
 param projectName = readEnvironmentVariable('FOUNDRY_PROJECT_NAME', 'proj-spectrum')
 
+// az ad signed-in-user show --query id -o tsv
+param developerPrincipalId = readEnvironmentVariable('DEVELOPER_PRINCIPAL_ID', '')
+
 param deployFireworks = bool(readEnvironmentVariable('DEPLOY_FIREWORKS', 'true'))
 param fireworksModel = readEnvironmentVariable('FIREWORKS_MODEL', 'FW-Nemotron-Lightning-3.5-30B-A3B')
 param fireworksDeploymentName = readEnvironmentVariable('FIREWORKS_DEPLOYMENT_NAME', 'fireworks')

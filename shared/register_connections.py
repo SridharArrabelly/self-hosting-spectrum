@@ -52,15 +52,25 @@ def mgmt_client(subscription_id: str) -> CognitiveServicesManagementClient:
     return CognitiveServicesManagementClient(AzureCliCredential(), subscription_id)
 
 
-def build_connection(settings: Settings, option: Option) -> ConnectionPropertiesV2BasicResource:
-    """An ApiManagement connection pointing at one route.
+def connection_target(settings: Settings, option: Option) -> str:
+    """Base URL Foundry will call, with a trailing slash.
 
-    The target deliberately has no trailing /chat/completions - Foundry adds it.
+    Foundry concatenates 'chat/completions' onto the connection target without
+    inserting a separator. Registering '.../v1/azure-vm' therefore produces
+    '.../v1/azure-vmchat/completions' and the agent fails with
+    "Model gateway error: Upstream gateway returned NotFound" - which reads like
+    a missing deployment rather than a missing slash. Do not add
+    '/chat/completions' yourself either; that yields a doubled path.
     """
+    return settings.base_url_for(option).rstrip("/") + "/"
+
+
+def build_connection(settings: Settings, option: Option) -> ConnectionPropertiesV2BasicResource:
+    """An ApiManagement connection pointing at one route."""
     return ConnectionPropertiesV2BasicResource(
         properties=ApiKeyAuthConnectionProperties(
             category="ApiManagement",
-            target=settings.base_url_for(option),
+            target=connection_target(settings, option),
             credentials=ConnectionApiKey(key=settings.apim_subscription_key),
             is_shared_to_all=True,
             metadata={
@@ -75,7 +85,7 @@ def build_connection(settings: Settings, option: Option) -> ConnectionProperties
 
 def register(settings: Settings, option: Option, account: str, project: str) -> bool:
     client = mgmt_client(settings.subscription_id)
-    target = settings.base_url_for(option)
+    target = connection_target(settings, option)
     try:
         client.project_connections.create(
             settings.resource_group,

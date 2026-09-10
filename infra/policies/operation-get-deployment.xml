@@ -1,0 +1,77 @@
+<!--
+  GET /deployments/{deploymentId}
+
+  Answers the deployment-discovery probe that Foundry Agent Service issues
+  before running a Bring Your Own Model agent. Foundry expects the Azure OpenAI
+  deployment shape; none of the four backends in this repo are Azure OpenAI, so
+  the gateway answers on their behalf.
+
+  This is safe because it asserts nothing that is not already true: the caller
+  has been authenticated by the shared fragment, and reaching this operation at
+  all means the route exists. The probe is short-circuited with
+  <return-response>, so it never touches a backend - no GPU is woken, no token
+  is spent, and the laptop in Option 4 is not called.
+
+  Note there is no <base /> in <backend>: returning a response in <inbound>
+  ends processing.
+-->
+<policies>
+  <inbound>
+    <base />
+    <return-response>
+      <set-status code="200" reason="OK" />
+      <set-header name="Content-Type" exists-action="override">
+        <value>application/json</value>
+      </set-header>
+      <set-body>@{
+        var id = context.Request.MatchedParameters.ContainsKey("deploymentId")
+          ? context.Request.MatchedParameters["deploymentId"]
+          : "default";
+
+        // Deliberately a superset of two shapes. Foundry's model gateway parses
+        // this as an "AzureOpenAI" provider deployment and wants the ARM-style
+        // envelope (name / properties.model / sku); older Azure OpenAI
+        // data-plane clients want the flat one (object / model / status /
+        // scale_settings). Returning only the flat shape fails with
+        // "Failed to parse deployment response ... from provider 'AzureOpenAI'".
+        // Emitting both costs nothing and satisfies either reader.
+        return new JObject(
+          new JProperty("id", id),
+          new JProperty("name", id),
+          new JProperty("type", "Microsoft.CognitiveServices/accounts/deployments"),
+          new JProperty("object", "deployment"),
+          new JProperty("model", id),
+          new JProperty("owner", "organization-owner"),
+          new JProperty("status", "succeeded"),
+          new JProperty("scale_settings", new JObject(
+            new JProperty("scale_type", "standard")
+          )),
+          new JProperty("sku", new JObject(
+            new JProperty("name", "Standard"),
+            new JProperty("capacity", 1)
+          )),
+          new JProperty("properties", new JObject(
+            new JProperty("model", new JObject(
+              new JProperty("format", "OpenAI"),
+              new JProperty("name", id),
+              new JProperty("version", "1")
+            )),
+            new JProperty("provisioningState", "Succeeded"),
+            new JProperty("capabilities", new JObject(
+              new JProperty("chatCompletion", "true")
+            ))
+          ))
+        ).ToString();
+      }</set-body>
+    </return-response>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

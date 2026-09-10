@@ -38,7 +38,7 @@ PROMPT = "List three benefits of running an LLM on your own infrastructure. Be b
 # Illustrative rates. Managed compute and the VM bill by the hour whether or not
 # anyone is talking to them, which is the whole point of showing them here.
 HOURLY_COST: dict[int, float] = {
-    1: 3.67,   # A100 80GB managed compute
+    1: 7.91,   # H100 80GB managed compute (A100 80GB is 3.67)
     2: 0.00,   # Fireworks: per token only
     3: 0.19,   # Standard_D4s_v5
     4: 0.00,   # your own hardware
@@ -107,7 +107,7 @@ def one_call(client: httpx.Client, settings: Settings, option: Option) -> tuple[
     return elapsed, response.json()
 
 
-def measure(settings: Settings, option: Option, runs: int, warmup: bool) -> Result:
+def measure(settings: Settings, option: Option, runs: int, warmup: bool, pause: float = 0.0) -> Result:
     result = Result(option=option)
     headers = {
         "Ocp-Apim-Subscription-Key": settings.apim_subscription_key,
@@ -127,6 +127,11 @@ def measure(settings: Settings, option: Option, runs: int, warmup: bool) -> Resu
                 return result
 
         for i in range(runs):
+            # Per-token backends throttle on requests-per-minute as well as
+            # tokens: Fireworks returns 429 for back-to-back calls. A short
+            # pause measures steady-state latency rather than throttle recovery.
+            if pause and i:
+                time.sleep(pause)
             print(f"  {label}: run {i + 1}/{runs}...", end="", flush=True)
             try:
                 elapsed, payload = one_call(client, settings, option)
@@ -201,6 +206,9 @@ def main() -> int:
     parser.add_argument("--options", type=int, nargs="+", choices=sorted(OPTIONS),
                         default=sorted(OPTIONS))
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--pause", type=float, default=0.0,
+                        help="Seconds between runs. Raise it if a backend throttles back-to-back "
+                             "calls, so the numbers measure latency rather than throttle recovery.")
     parser.add_argument("--no-warmup", action="store_true",
                         help="Skip the discarded first call. Cold starts will skew the mean.")
     parser.add_argument("--csv", type=Path)
@@ -214,7 +222,7 @@ def main() -> int:
     print(f"Gateway: {settings.apim_gateway_url}")
     print(f"Prompt : {PROMPT}\n")
 
-    results = [measure(settings, get_option(n), args.runs, not args.no_warmup)
+    results = [measure(settings, get_option(n), args.runs, not args.no_warmup, args.pause)
                for n in args.options]
     render(results)
 

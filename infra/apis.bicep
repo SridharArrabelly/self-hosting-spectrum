@@ -30,6 +30,15 @@ param vmBackendUrl string = ''
 @description('Option 4 Dev Tunnel URL. Empty leaves the route stubbed.')
 param foundryLocalBackendUrl string = ''
 
+@description('''
+Name of the Option 1 managed compute deployment. Managed compute does NOT share
+the /openai/v1 route with the rest of the account - each deployment gets its own
+path, /managed-deployments/<name>/v1, which the create response reports as
+properties.routes.chatCompletionsScoringPath. Empty leaves Option 1 pointed at
+/openai/v1, which will 404 until a deployment exists.
+''')
+param managedComputeDeploymentName string = ''
+
 var apimName = 'apim-spectrum-${nameSuffix}'
 var foundryAccountName = 'aif-spectrum-${nameSuffix}'
 
@@ -52,6 +61,12 @@ var foundryEndpoint = foundry.properties.endpoint
 var foundryBase = endsWith(foundryEndpoint, '/') ? foundryEndpoint : '${foundryEndpoint}/'
 var foundryOpenAiV1 = '${foundryBase}openai/v1'
 
+// Option 1 is the exception: a managed compute deployment is served from its
+// own path rather than the account-wide /openai/v1 surface.
+var managedComputeBackend = empty(managedComputeDeploymentName)
+  ? foundryOpenAiV1
+  : '${foundryBase}managed-deployments/${managedComputeDeploymentName}/v1'
+
 module apis 'modules/apim-apis.bicep' = {
   name: 'apim-apis'
   params: {
@@ -59,7 +74,7 @@ module apis 'modules/apim-apis.bicep' = {
     loggerId: apim::logger.id
     tokensPerMinute: tokensPerMinute
     foundryAudience: foundryAudience
-    managedComputeBackendUrl: foundryOpenAiV1
+    managedComputeBackendUrl: managedComputeBackend
     fireworksBackendUrl: foundryOpenAiV1
     vmBackendUrl: vmBackendUrl
     foundryLocalBackendUrl: foundryLocalBackendUrl
