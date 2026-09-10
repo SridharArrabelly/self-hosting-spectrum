@@ -1,0 +1,38 @@
+<!--
+  Option 2 - Fireworks on Foundry.
+
+  A partner inference deployment living on the same Foundry account as Option 1
+  but served by Fireworks AI on shared, pay-per-token capacity. It is an
+  ordinary Microsoft.CognitiveServices/accounts/deployments resource with
+  model.format = 'Fireworks', so it is reached over the identical /openai/v1
+  route and authenticated the same way.
+
+  That is the interesting part of this policy: the difference between "rent a
+  GPU by the hour" and "pay per token to a partner" is one named value at the
+  gateway. Nothing above this line changes.
+
+  Gotcha: the `model` field in the request body is the *deployment* name, not
+  the FW- catalog id. Small Fireworks models are provisioned-throughput only;
+  the pay-as-you-go models carry a 15-day retirement notice, which is why the
+  model id is a parameter and not hard-coded.
+-->
+<policies>
+  <inbound>
+    <base />
+    <include-fragment fragment-id="llm-common" />
+    <set-backend-service base-url="{{fireworks-backend-url}}" />
+    <authentication-managed-identity resource="{{spectrum-foundry-audience}}" output-token-variable-name="managed-id-token" ignore-error="false" />
+    <set-header name="Authorization" exists-action="override">
+      <value>@("Bearer " + (string)context.Variables["managed-id-token"])</value>
+    </set-header>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

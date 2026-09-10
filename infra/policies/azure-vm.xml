@@ -1,0 +1,34 @@
+<!--
+  Option 3 - a VM you own, running your own inference server.
+
+  Ollama (or vLLM) on an Azure VM. Both expose the OpenAI API at /v1, so the
+  backend URL ends there and the gateway appends /chat/completions.
+
+  There is no credential on this hop, and that is deliberate: the VM's NSG only
+  admits the ApiManagement service tag, so APIM is the sole ingress and the
+  gateway key is the real auth boundary. Locking the NSG to a service tag
+  instead of APIM's IP keeps the VM deployable without waiting on APIM.
+
+  For production, put the VM in a private subnet and inject APIM into the VNet.
+  That is stronger, but it serialises a 40-minute dependency, so this repo does
+  the service-tag version and documents the upgrade.
+
+  Timeouts are generous: a small model on a CPU VM is slow on the first token,
+  and cold-starting a model that is not yet resident can take a while.
+-->
+<policies>
+  <inbound>
+    <base />
+    <include-fragment fragment-id="llm-common" />
+    <set-backend-service base-url="{{vm-backend-url}}" />
+  </inbound>
+  <backend>
+    <forward-request timeout="300" buffer-request-body="true" />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

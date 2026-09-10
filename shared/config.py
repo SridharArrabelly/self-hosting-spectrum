@@ -86,8 +86,8 @@ OPTIONS: dict[int, Option] = {
         runtime_owner="You",
         location="Your own machine",
         model_env_var="FOUNDRY_LOCAL_MODEL",
-        default_model="qwen2.5-0.5b-instruct-generic-cpu",
-        notes="Runs on local CPU/GPU. Published to APIM through a Dev Tunnel.",
+        default_model="qwen2.5-0.5b",
+        notes="Runs on local CPU/GPU/NPU. Published to APIM through a Dev Tunnel.",
     ),
 }
 

@@ -27,14 +27,6 @@ param projectDisplayName string = 'Self-Hosting Spectrum'
 @description('Tags applied to every resource.')
 param tags object = {}
 
-@description('Principal IDs granted data-plane access to the account (e.g. the APIM managed identity).')
-param dataPlanePrincipalIds array = []
-
-// Azure AI User - the data-plane role used to call inference endpoints.
-// Managed Compute docs are inconsistent about whether this or 'Foundry User' is
-// required; this is the role the working deploy-models-managed sample uses.
-var azureAiUserRoleId = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
-
 resource account 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
   name: accountName
   location: location
@@ -74,21 +66,6 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' = {
     description: 'Agents and connections for the four self-hosting options.'
   }
 }
-
-resource dataPlaneRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
-  for (principalId, i) in dataPlanePrincipalIds: {
-    name: guid(account.id, principalId, azureAiUserRoleId)
-    scope: account
-    properties: {
-      roleDefinitionId: subscriptionResourceId(
-        'Microsoft.Authorization/roleDefinitions',
-        azureAiUserRoleId
-      )
-      principalId: principalId
-      principalType: 'ServicePrincipal'
-    }
-  }
-]
 
 output accountName string = account.name
 output accountId string = account.id

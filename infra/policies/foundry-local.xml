@@ -1,0 +1,45 @@
+<!--
+  Option 4 - Foundry Local, running on your own machine.
+
+  The model is on a laptop at http://localhost:39839, an address the gateway in
+  Azure cannot route to. A Microsoft Dev Tunnel bridges the gap: the CLI on the
+  laptop dials out to a Microsoft relay and publishes a stable HTTPS URL that
+  forwards to the local port. To APIM it is just another backend.
+
+  (The alternative is the APIM self-hosted gateway, which runs the data plane
+  as a container on the machine so inference traffic never leaves it. That is
+  the right answer for sovereign or air-gapped deployments and it is described
+  in the README - it needs Docker and the Developer or Premium SKU.)
+
+  Two things make this route work:
+
+  1. Dev Tunnels serve an anti-phishing interstitial to browser-shaped
+     requests. Without the skip header you get HTML back instead of JSON and
+     the client fails with a confusing parse error. The header is set here, at
+     the gateway, so no client ever has to know the tunnel exists.
+
+  2. Timeouts are long. A laptop CPU generating tokens is the slowest backend
+     in this repository by a wide margin.
+
+  The tunnel URL is a named value so 04-foundry-local/tunnel.py can refresh it
+  in one command when the tunnel is recreated.
+-->
+<policies>
+  <inbound>
+    <base />
+    <include-fragment fragment-id="llm-common" />
+    <set-backend-service base-url="{{foundry-local-backend-url}}" />
+    <set-header name="X-Tunnel-Skip-AntiPhishing-Page" exists-action="override">
+      <value>true</value>
+    </set-header>
+  </inbound>
+  <backend>
+    <forward-request timeout="600" buffer-request-body="true" />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

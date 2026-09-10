@@ -1,0 +1,38 @@
+<!--
+  Option 1 - Foundry Managed Compute.
+
+  Dedicated GPU capacity inside Microsoft Foundry. The new (non-hub) managed
+  compute path is natively OpenAI-compatible and is served from the account's
+  /openai/v1 route, so no protocol translation is needed here - only auth.
+
+  Auth is the APIM system-assigned managed identity, granted a data-plane role
+  on the Foundry account by infra/modules/foundry.bicep. No key is ever stored.
+
+  The audience is a named value because Microsoft Learn is currently
+  inconsistent about it: managed-compute-overview documents
+  https://ai.azure.com with the Foundry User role, while the deploy-models
+  sample uses https://cognitiveservices.azure.com with Azure AI User. If you
+  get a 401, flip spectrum-foundry-audience rather than editing this policy.
+
+  The `model` in the request body must be the managed compute deployment name.
+-->
+<policies>
+  <inbound>
+    <base />
+    <include-fragment fragment-id="llm-common" />
+    <set-backend-service base-url="{{mc-backend-url}}" />
+    <authentication-managed-identity resource="{{spectrum-foundry-audience}}" output-token-variable-name="managed-id-token" ignore-error="false" />
+    <set-header name="Authorization" exists-action="override">
+      <value>@("Bearer " + (string)context.Variables["managed-id-token"])</value>
+    </set-header>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

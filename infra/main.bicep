@@ -93,8 +93,9 @@ module apim 'modules/apim.bicep' = {
 
 // --- Foundry ---------------------------------------------------------------
 // Backs Option 1 (Managed Compute), Option 2 (Fireworks) and the agents.
-// APIM's managed identity gets data-plane access so its policies can call
-// Foundry without a key.
+// Deliberately does NOT depend on APIM: the role assignment that connects the
+// two lives in foundry-rbac.bicep so this builds in parallel with the gateway
+// instead of queueing behind its 30-45 minute provision.
 module foundry 'modules/foundry.bicep' = {
   name: 'foundry'
   params: {
@@ -102,7 +103,16 @@ module foundry 'modules/foundry.bicep' = {
     accountName: foundryAccountName
     projectName: projectName
     tags: tags
-    dataPlanePrincipalIds: [
+  }
+}
+
+// APIM's managed identity gets data-plane access so its policies can call
+// Foundry without a key. This is the only thing that needs both to exist.
+module foundryRbac 'modules/foundry-rbac.bicep' = {
+  name: 'foundry-rbac'
+  params: {
+    accountName: foundry.outputs.accountName
+    principalIds: [
       apim.outputs.apimPrincipalId
     ]
   }
