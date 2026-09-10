@@ -1,0 +1,46 @@
+# ---- Secrets & local config -------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+azure.parameters.local.json
+infra/main.local.bicepparam
+
+# Deploy-time generated outputs (contain endpoints, keys, tunnel URLs)
+.outputs/
+outputs.json
+deployment-outputs.json
+
+# ---- Python / uv ------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+uv.lock.bak
+
+# Local-only uv index override (corporate package feeds are environment-specific).
+# See README "Behind a corporate package feed".
+uv.toml
+
+# ---- Azure / Bicep ----------------------------------------------------------
+.azure/
+*.bicep.json
+
+# ---- Editors & OS -----------------------------------------------------------
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---- Benchmark / demo artefacts ---------------------------------------------
+benchmarks/*.json
+benchmarks/*.csv
+!benchmarks/.gitkeep
+*.log
