@@ -563,9 +563,16 @@ the agent's.
   output-token-variable-name="jwt">
   <audiences>
     <audience>{{spectrum-entra-audience}}</audience>
+    <audience>{{spectrum-entra-audience-alt}}</audience>
   </audiences>
 </validate-azure-ad-token>
 ```
+
+The audience is listed twice on purpose. `validate-azure-ad-token` compares the `aud` claim as an exact
+string, and both spellings of this resource are in circulation: Azure CLI issues tokens for
+`https://cognitiveservices.azure.com` with no trailing slash, while several SDKs and the Foundry connection's
+**Audience** field are commonly configured with one. Bicep derives the second named value from the first, so
+the pair can never drift, and an entire class of silent `401` disappears.
 
 Two very different callers present the same kind of token to the same policy:
 
@@ -833,7 +840,7 @@ account** — without that the name stays reserved for 48 hours and the next dep
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `401` from every route, keyless mode | No Entra token was sent, or it is for the wrong audience. | `az login --tenant <id>`, then confirm `ENTRA_AUDIENCE` in `.env` matches `spectrum-entra-audience` in APIM. |
+| `401` from every route, keyless mode | No Entra token was sent, or it is for the wrong audience. | `az login --tenant <id>`, then confirm `ENTRA_AUDIENCE` in `.env` matches `spectrum-entra-audience` in APIM. Both the bare and trailing-slash spellings are accepted, so a mismatch here is a genuinely different audience. |
 | `403 "not on the gateway allow-list"` | The caller's application ID is not in `spectrum-entra-client-ids`. | `uv run python infra/scripts/setup_entra.py`. Use `--show` to see the current list, `--add-client-id` to extend it. |
 | Agents `403` but `client.py` works | The Foundry project's managed identity is missing from the allow-list, or you used its **object** ID instead of its **application** ID. | Re-run `setup_entra.py`; it resolves object → application ID for you. |
 | `setup_entra.py` says the project has no managed identity | The project predates the identity block in `infra/modules/foundry.bicep`. | Re-run `deploy.py`, or add one in the portal under Foundry → your project → Identity. |

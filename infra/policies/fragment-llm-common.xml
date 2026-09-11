@@ -45,6 +45,7 @@
         require-signed-tokens="true">
         <audiences>
           <audience>{{spectrum-entra-audience}}</audience>
+          <audience>{{spectrum-entra-audience-alt}}</audience>
         </audiences>
       </validate-azure-ad-token>
 

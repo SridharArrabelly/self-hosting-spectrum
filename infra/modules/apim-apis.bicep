@@ -61,6 +61,13 @@ param foundryLocalBackendUrl string = ''
 // the API will not create. This one fails fast and obviously if it is ever hit.
 var notWiredYet = 'https://not-configured.invalid/v1'
 
+// Normalise the audience so the two spellings below are always a matched pair,
+// whichever way the parameter happened to be written. The max() guard is only
+// there to satisfy the analyser; endsWith already rules out an empty string.
+var entraAudienceBare = endsWith(entraAudience, '/')
+  ? substring(entraAudience, 0, max(length(entraAudience) - 1, 0))
+  : entraAudience
+
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   name: apimName
 }
@@ -123,7 +130,7 @@ resource nvFoundryAudience 'Microsoft.ApiManagement/service/namedValues@2024-05-
 }
 
 // --- Entra (keyless) inbound auth ------------------------------------------
-// These four drive the validate-azure-ad-token block in fragment-llm-common.xml.
+// These drive the validate-azure-ad-token block in fragment-llm-common.xml.
 // They are named values rather than literals so the gateway can be switched
 // between keyless and key auth without touching policy XML.
 
@@ -150,7 +157,23 @@ resource nvEntraAudience 'Microsoft.ApiManagement/service/namedValues@2024-05-01
   name: 'spectrum-entra-audience'
   properties: {
     displayName: 'spectrum-entra-audience'
-    value: entraAudience
+    value: entraAudienceBare
+  }
+}
+
+// The same audience with a trailing slash.
+//
+// validate-azure-ad-token matches the aud claim as an exact string, and both
+// spellings are in circulation: Azure CLI returns a token with no trailing
+// slash for this resource, while several SDKs and the Foundry connection's
+// Audience field are commonly configured with one. Listing both is free and
+// removes an entire class of 401 that is invisible from the error message.
+resource nvEntraAudienceAlt 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
+  parent: apim
+  name: 'spectrum-entra-audience-alt'
+  properties: {
+    displayName: 'spectrum-entra-audience-alt'
+    value: '${entraAudienceBare}/'
   }
 }
 
@@ -219,6 +242,7 @@ resource llmCommonFragment 'Microsoft.ApiManagement/service/policyFragments@2024
     nvAuthMode
     nvTenantId
     nvEntraAudience
+    nvEntraAudienceAlt
     nvEntraClientIds
   ]
 }
