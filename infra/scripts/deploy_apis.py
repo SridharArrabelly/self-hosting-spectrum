@@ -146,6 +146,7 @@ def main() -> int:
         os.environ["FOUNDRY_AAD_AUDIENCE"] = args.audience
 
     print(f"Publishing routes onto {apim_name}")
+    print(f"  auth mode     : {settings.gateway_auth_mode}")
     print(f"  tokens/minute : {os.environ.get('APIM_TOKENS_PER_MINUTE', '20000')} per route")
     print(f"  Foundry aud   : {os.environ.get('FOUNDRY_AAD_AUDIENCE', 'https://cognitiveservices.azure.com')}")
     for label, env_key in (("Option 3 VM", "VM_BACKEND_URL"), ("Option 4 local", "FOUNDRY_LOCAL_BACKEND_URL")):
@@ -166,8 +167,9 @@ def main() -> int:
 
     key = fetch_gateway_key(settings.subscription_id, settings.resource_group, apim_name)
     if key:
-        # Overwrites whatever deploy.py put there. The policy fragment compares
-        # against this subscription's key, not the built-in master key.
+        # Written even in Entra mode. Nothing uses it while GATEWAY_AUTH_MODE is
+        # entra, but having it on hand turns "is the gateway broken or is my
+        # token wrong?" into a one-line experiment.
         update_env_file({"APIM_SUBSCRIPTION_KEY": key})
     else:
         print("[warn] Could not read the spectrum-demo subscription key.")
@@ -178,6 +180,8 @@ def main() -> int:
         print(f"  {number}. {option.title:<32} {gateway}{option.route}/chat/completions")
 
     print("\nNext:")
+    if settings.uses_entra:
+        print("  uv run python infra/scripts/setup_entra.py    # allow-list the callers")
     print("  uv run python shared/client.py --option 2      # cheapest end-to-end check")
     return 0
 

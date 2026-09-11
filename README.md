@@ -10,6 +10,9 @@ code and the same request body work against all four.
 
 That is the whole point: **the hosting decision should not leak into your application code.**
 
+Authentication is **keyless**. Every caller — a developer running the client, or a Foundry agent calling on its
+own behalf — presents a Microsoft Entra token, and no shared secret is stored anywhere in the repository.
+
 ```console
 $ uv run python shared/client.py --all
 
@@ -50,16 +53,26 @@ $ uv run python shared/client.py --all
 
 ### One question decides it
 
-```
-Do you need the model weights to run on hardware you control?
-│
-├─ No ──► Do you want to manage capacity, or just pay for what you use?
-│         ├─ Pay per token, no capacity to manage ───────────► 2. Fireworks on Foundry
-│         └─ Dedicated, predictable, isolated GPUs ──────────► 1. Managed Compute
-│
-└─ Yes ─► Is "your hardware" in Azure or under your desk?
-          ├─ Azure VM you own and patch ─────────────────────► 3. Customer-managed VM
-          └─ A laptop, edge box, or air-gapped machine ──────► 4. Foundry Local
+```mermaid
+flowchart TD
+    q1{"Do the model weights have to run<br/>on hardware you control?"}
+    q2{"Manage capacity,<br/>or just pay for what you use?"}
+    q3{"Is 'your hardware' in Azure,<br/>or under your desk?"}
+
+    q1 -->|No| q2
+    q1 -->|Yes| q3
+
+    q2 -->|"Pay per token,<br/>no capacity to manage"| opt2["<b>2. Fireworks on Foundry</b><br/>partner runs it, per-token billing"]
+    q2 -->|"Dedicated, predictable,<br/>isolated GPUs"| opt1["<b>1. Managed Compute</b><br/>Foundry runs it, per-hour billing"]
+
+    q3 -->|"An Azure VM<br/>you own and patch"| opt3["<b>3. Customer-managed VM</b><br/>you run it, per-VM-hour billing"]
+    q3 -->|"A laptop, edge box,<br/>or air-gapped machine"| opt4["<b>4. Foundry Local</b><br/>you run it, no cloud runtime"]
+
+    classDef question fill:#f4f4f4,stroke:#8c8c8c,color:#1f1f1f
+    classDef answer fill:#1b6ca8,stroke:#0b4f6c,color:#ffffff
+
+    class q1,q2,q3 question
+    class opt1,opt2,opt3,opt4 answer
 ```
 
 The four rows are a spectrum of control versus operational burden. Moving down the table you gain control over
@@ -70,54 +83,72 @@ patching, scaling, and uptime. **Nothing above changes the API contract**, which
 
 ## 2. Architecture
 
-```
-                       shared/client.py --option 1|2|3|4   (identical payload)
-                                        │
-                        ┌───────────────▼────────────────┐
-                        │   Azure API Management         │
-                        │   Developer SKU, eastus2       │
-                        │   shared policy fragment:      │
-                        │    · credential normalisation  │
-                        │    · llm-token-limit           │
-                        │    · llm-emit-token-metric     │
-                        │    · App Insights logging      │
-                        └───┬────────┬────────┬──────────┘
-       /v1/managed-compute ─┘        │        └─ /v1/foundry-local
-              /v1/fireworks ─────────┘                    │
-                    /v1/azure-vm ────┐                    │
-                                     │                    │
-  ┌──────────────┐  ┌────────────────┴─┐  ┌───────────────▼─────────┐  ┌─────────────────────┐
-  │ Foundry      │  │ Fireworks        │  │ VM in eastus2           │  │ Dev Tunnel relay    │
-  │ Managed      │  │ deployment on    │  │ Ollama, OpenAI-compat   │  │         ↓           │
-  │ Compute      │  │ same Foundry acct│  │ NSG: APIM egress IP only│  │ Foundry Local :39839│
-  │ (H100)       │  │ (per token)      │  │ (Standard_D4s_v7, CPU)  │  │ on your laptop NPU  │
-  └──────────────┘  └──────────────────┘  └─────────────────────────┘  └─────────────────────┘
+```mermaid
+flowchart TD
+    client["shared/client.py --option 1|2|3|4<br/><i>identical payload, identical credential</i>"]
 
-   All four are also registered as Foundry BYOM connections (category ApiManagement)
-   → agents run with model = "<connection>/<model>"
+    subgraph gateway["Azure API Management &mdash; Developer SKU, eastus2"]
+        policy["<b>Shared policy fragment</b><br/>validate-azure-ad-token &middot; caller allow-list<br/>llm-token-limit &middot; llm-emit-token-metric<br/>App Insights logging"]
+    end
+
+    client -->|Entra bearer token| policy
+
+    policy -->|/v1/managed-compute| o1
+    policy -->|/v1/fireworks| o2
+    policy -->|/v1/azure-vm| o3
+    policy -->|/v1/foundry-local| o4
+
+    subgraph azure["Azure"]
+        o1["<b>1. Foundry Managed Compute</b><br/>dedicated H100<br/>billed per hour"]
+        o2["<b>2. Fireworks on Foundry</b><br/>partner serverless<br/>billed per token"]
+        o3["<b>3. Azure VM</b><br/>Ollama, OpenAI-compatible<br/>NSG: APIM egress IP only"]
+    end
+
+    subgraph local["Your laptop"]
+        o4["<b>4. Foundry Local</b><br/>via Dev Tunnel relay<br/>CPU / GPU / NPU, port 39839"]
+    end
+
+    agents["Foundry Agent Service<br/><i>all four registered as BYOM connections</i><br/>model = &quot;&lt;connection&gt;/&lt;model&gt;&quot;"]
+    agents -->|managed identity token| policy
+
+    classDef gw fill:#0b5394,stroke:#073763,color:#ffffff
+    classDef cloud fill:#1b6ca8,stroke:#0b4f6c,color:#ffffff
+    classDef laptop fill:#7b5ea7,stroke:#4a3a66,color:#ffffff
+    classDef caller fill:#2d6a4f,stroke:#1b4332,color:#ffffff
+
+    class policy gw
+    class o1,o2,o3 cloud
+    class o4 laptop
+    class client,agents caller
 ```
 
 Everything terminates at one gateway, so authentication, rate limiting, token accounting, and logging are
 written **once** and apply identically whether the model is on an H100 in Azure or an NPU in your laptop.
+
+Note the two arrows into the gateway. A developer running `client.py` and a Foundry agent calling through a
+BYOM connection present the *same kind* of credential — a Microsoft Entra token — and hit the *same* policy.
+Neither holds a key.
 
 ### Repository layout
 
 ```text
 self-hosting-spectrum/
 ├── README.md                      # this file - all prose lives here
+├── LICENSE                        # MIT
 ├── pyproject.toml                 # uv workspace
 ├── infra/
 │   ├── main.bicep                 # Foundry + APIM + VM + observability
 │   ├── apis.bicep                 # the four APIM routes
 │   ├── modules/                   # foundry, fireworks, apim, apim-apis, vm-inference, foundry-rbac
 │   ├── policies/                  # fragment-llm-common.xml + one policy per route
-│   └── scripts/                   # preflight.py, deploy.py, deploy_apis.py, teardown.py
+│   └── scripts/                   # preflight, deploy, deploy_apis, setup_entra, teardown
 ├── 01-managed-compute/            # list_templates.py, deploy_managed_compute.py
 ├── 02-fireworks-on-foundry/       # list_models.py
 ├── 03-azure-gpu-vm/               # cloud-init.yaml, docker-compose.yml
 ├── 04-foundry-local/              # bootstrap.py, tunnel.py
 └── shared/
     ├── config.py                  # the option → route table, single source of truth
+    ├── auth.py                    # Entra token vs key, the only place auth is decided
     ├── client.py                  # --option 1|2|3|4, raw OpenAI call
     ├── agent.py                   # --option 1|2|3|4, Foundry BYOM prompt agent
     ├── register_connections.py    # register the routes as Foundry connections
@@ -151,37 +182,63 @@ by the deploy scripts.
 
 ## 4. Quickstart
 
+**Step 0 — install dependencies.**
+
 ```powershell
-# 0. dependencies
 uv sync
+```
 
-# 1. preflight - tenant, providers, Fireworks feature flag, managed compute quota
+**Step 1 — preflight.** Checks the tenant, resource providers, the Fireworks feature flag, and managed compute quota
+before anything is created.
+
+```powershell
 uv run python infra/scripts/preflight.py
+```
 
-# 2. core infrastructure: Foundry account + project, APIM, VM, Log Analytics, App Insights
-#    APIM Developer takes 30-45 minutes on first creation.
+**Step 2 — core infrastructure.** Creates the Foundry account and project, APIM, the VM, Log Analytics, and
+Application Insights. Budget 30–45 minutes: an APIM Developer instance is slow to create the first time.
+
+```powershell
 uv run python infra/scripts/deploy.py
+```
 
-# 3. publish the four routes onto the gateway
+**Step 3 — publish the four routes onto the gateway.** Seconds, not minutes. Re-run it whenever a policy, a backend
+URL, or the Dev Tunnel changes.
+
+```powershell
 uv run python infra/scripts/deploy_apis.py
+```
 
-# 4. cheapest end-to-end check (option 2 is per-token, fractions of a cent)
+**Step 4 — make the gateway keyless.** Resolves who is allowed to call it (you, via Azure CLI; and the Foundry
+project's managed identity, for agents) and publishes the allow-list to APIM.
+
+```powershell
+uv run python infra/scripts/setup_entra.py
+```
+
+**Step 5 — cheapest end-to-end check.** Option 2 is billed per token, so this costs a fraction of a cent.
+
+```powershell
 uv run python shared/client.py --option 2
 ```
 
-Options 3 and 4 need one extra step each:
+Options 1 and 4 need one extra step each.
+
+**Option 4** — start the local runtime, then publish it through a Dev Tunnel. Leave `tunnel.py` running.
 
 ```powershell
-# Option 4: start the local runtime, then publish it through a Dev Tunnel
 uv run python 04-foundry-local/bootstrap.py
-uv run python 04-foundry-local/tunnel.py     # leave this running
+uv run python 04-foundry-local/tunnel.py
+```
 
-# Option 1: expensive - bring it up last, tear it down first
+**Option 1** — the expensive one. Bring it up last and tear it down first.
+
+```powershell
 uv run python 01-managed-compute/list_templates.py
 uv run python 01-managed-compute/deploy_managed_compute.py
 ```
 
-Then:
+Then run all four and compare:
 
 ```powershell
 uv run python shared/client.py --all
@@ -263,12 +320,12 @@ $ uv run python 01-managed-compute/list_templates.py
 
 **Deploy / verify / delete**
 
-```powershell
-uv run python 01-managed-compute/list_templates.py            # quota + fleet capacity
-uv run python 01-managed-compute/deploy_managed_compute.py    # ~10-25 min
-uv run python shared/client.py --option 1
-uv run python 01-managed-compute/deploy_managed_compute.py --delete   # STOPS BILLING
-```
+| Step | Command | Notes |
+|---|---|---|
+| Check quota and fleet capacity | `uv run python 01-managed-compute/list_templates.py` | Read-only, free |
+| Create the deployment | `uv run python 01-managed-compute/deploy_managed_compute.py` | 10–25 min, **starts billing** |
+| Verify through the gateway | `uv run python shared/client.py --option 1` | |
+| Delete the deployment | `uv run python 01-managed-compute/deploy_managed_compute.py --delete` | **Stops billing** |
 
 A deployment **cannot be deleted while it is still `Creating`** — the API returns
 `RequestConflict: Another operation is in progress`. Wait for it to reach a terminal state, then delete.
@@ -373,9 +430,15 @@ sourceAddressPrefixes: apimOutboundIpAddresses   // e.g. [ '135.18.171.17' ]
 
 **Verify**
 
+Through the gateway:
+
 ```powershell
 uv run python shared/client.py --option 3
-# on the VM itself, without going through the gateway:
+```
+
+On the VM itself, bypassing the gateway — useful for deciding whether a failure is the model or the network path:
+
+```powershell
 az vm run-command invoke -g rg-self-hosting-spectrum -n vm-inference-shs01 `
   --command-id RunShellScript --scripts "curl -s localhost:11434/v1/models"
 ```
@@ -430,8 +493,31 @@ plane onto your machine; Option B leaves it in Azure and moves the *network path
 prove data residency. If your requirement *is* data residency, use A — the policies in `infra/policies/` work
 unchanged.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as client.py<br/>(anywhere)
+    participant G as APIM<br/>(Azure, eastus2)
+    participant R as Dev Tunnel relay<br/>(Microsoft)
+    participant F as Foundry Local<br/>(127.0.0.1:39839)
+
+    Note over C,G: Entra bearer token, identical to options 1-3
+    C->>G: POST /v1/foundry-local/chat/completions
+    G->>G: validate token, allow-list,<br/>llm-token-limit, metrics
+    G->>R: POST https://shs-foundry-local-39839...devtunnels.ms<br/>+ X-Tunnel-Skip-AntiPhishing-Page
+    Note over R,F: tunnel.py holds an outbound connection open,<br/>so no inbound port is exposed on the laptop
+    R->>F: forwarded over the existing connection
+    F->>F: inference on local CPU / GPU / NPU
+    F-->>R: completion + usage
+    R-->>G: completion + usage
+    G->>G: count tokens, emit metrics
+    G-->>C: OpenAI-shaped response
+```
+
+Start the tunnel and leave it running:
+
 ```powershell
-uv run python 04-foundry-local/tunnel.py    # leave running
+uv run python 04-foundry-local/tunnel.py
 ```
 
 The tunnel is **persistent and named** (`shs-foundry-local`) so its URL survives restarts, and the script pushes
@@ -466,25 +552,60 @@ model on a laptop NPU without a single conditional.
 
 ### What the fragment does
 
-**1. Credential normalisation.** APIM validates its own subscription key *before any policy runs*, so a policy
-cannot rescue a client that sends the key somewhere unexpected. The APIs are therefore declared
+**1. Inbound authentication - keyless by default.** The gateway validates a Microsoft Entra token. No shared
+secret exists anywhere in the repository: `az login` is the developer's credential, and a managed identity is
+the agent's.
+
+```xml
+<validate-azure-ad-token
+  tenant-id="{{spectrum-tenant-id}}"
+  header-name="Authorization"
+  output-token-variable-name="jwt">
+  <audiences>
+    <audience>{{spectrum-entra-audience}}</audience>
+  </audiences>
+</validate-azure-ad-token>
+```
+
+Two very different callers present the same kind of token to the same policy:
+
+| Caller | Identity | Application ID in the `appid` claim |
+|---|---|---|
+| `client.py`, `benchmark.py`, run by a developer | the human, via `az login` | Azure CLI's first-party app, `04b07795-...` |
+| A Foundry agent calling through a BYOM connection | the Foundry project's system-assigned managed identity | discovered by `setup_entra.py` |
+
+[`infra/scripts/setup_entra.py`](infra/scripts/setup_entra.py) resolves both and writes them into a single APIM
+named value, so changing who may call the gateway is a named-value update rather than a policy redeployment.
+
+> **Why check the claim instead of using `client-application-ids`?** `validate-azure-ad-token` does have that
+> element, but it takes one literal `<application-id>` child per ID, and a named value cannot expand into
+> several elements. Reading the claim in a `<choose>` keeps the whole list in one updatable value. An empty
+> list means *any caller in the tenant holding a valid token for the audience*, so an unset value degrades to
+> the documented default instead of locking everybody out.
+
+> **Object ID is not application ID.** ARM hands back the managed identity's *object* ID; the token carries its
+> *application* ID. Mixing them up produces a `403` that looks exactly like a broken policy.
+> `az ad sp show --id <object-id>` is the bridge, and `setup_entra.py` does it for you.
+
+**2. Key mode, for migrations.** Setting `GATEWAY_AUTH_MODE=key` swaps the block above for a subscription-key
+check. It exists because most real deployments start there, and the point of the demo is that moving off keys is
+a configuration change rather than a rewrite. APIM validates its own subscription key *before any policy runs*,
+so a policy cannot rescue a client that sends the key somewhere unexpected. The APIs are therefore declared
 `subscriptionRequired: false` and the fragment does the check itself, accepting every shape a real client uses:
+`Ocp-Apim-Subscription-Key` for APIM-native clients and `curl`, `api-key` for the Azure OpenAI SDK, the
+`Authorization` header for the OpenAI SDK (which cannot be told to do anything else), and a `?subscription-key=`
+query parameter for browsers and quick links.
 
-| Header | Sent by |
-|---|---|
-| `Ocp-Apim-Subscription-Key` | APIM-native clients, `curl`, the docs |
-| `api-key` | Azure OpenAI SDK, Foundry BYOM connections |
-| `Authorization: Bearer …` | the OpenAI SDK, which cannot be told to do anything else |
-| `?subscription-key=` | browsers and quick links |
+Either way, **one unmodified OpenAI SDK client reaches all four routes**. In Entra mode the token is handed to
+the SDK as its `api_key`, because the SDK's only job with that value is to send it as a bearer token, which is
+exactly the header `validate-azure-ad-token` reads. The keyless path therefore needs no custom transport and no
+branch in [`shared/client.py`](shared/client.py).
 
-This is precisely what lets **one unmodified OpenAI SDK client** hit all four routes. Swap this block for
-`validate-azure-ad-token` to move the gateway to Entra.
+**3. Credential stripping.** All inbound credential headers are deleted before the request leaves the gateway,
+and each route then attaches its own backend credential. A token or key that is valid at the gateway is never
+replayed against Foundry, the VM, or your laptop.
 
-**2. Credential stripping.** All inbound credential headers are deleted before the request leaves the gateway,
-then each route attaches its own backend credential. A key that is valid at the gateway is never replayed
-against Foundry, the VM, or your laptop.
-
-**3. Token budget.**
+**4. Token budget.**
 
 ```xml
 <llm-token-limit
@@ -500,7 +621,7 @@ demonstrable rather than theoretical. `estimate-prompt-tokens="false"` reads rea
 `usage` object instead of guessing from the prompt: more accurate, but the limit applies *after* the offending
 call rather than before it.
 
-**4. Token metrics.**
+**5. Token metrics.**
 
 ```xml
 <llm-emit-token-metric namespace="self-hosting-spectrum">
@@ -545,23 +666,55 @@ Foundry Agent Service used to require an Azure OpenAI deployment. It now accepts
 endpoint through the connection categories **`ApiManagement`** and **`ModelGateway`** — so all four options
 become real Foundry agents, not just the cloud ones.
 
+Register the four connections (`apim-managed-compute`, `apim-fireworks`, `apim-azure-vm`, `apim-foundry-local`),
+then run an agent against any of them:
+
 ```powershell
-uv run python shared/register_connections.py      # creates apim-managed-compute, apim-fireworks, ...
+uv run python shared/register_connections.py
 uv run python shared/agent.py --option 4
 ```
 
-Two details decide whether this works:
+Three details decide whether this works:
 
 1. **Foundry appends `chat/completions` to the connection target.** Register
-   `https://<apim>.azure-api.net/v1/azure-vm` and you get exactly the route this repo publishes. Leave
-   *"Include deployment name in URL path"* **disabled**.
+   `https://<apim>.azure-api.net/v1/azure-vm/` and you get exactly the route this repo publishes. Leave
+   *"Include deployment name in URL path"* **disabled** — that is `deploymentInPath: "false"` in the
+   connection metadata, and it is **not** optional: a connection without it fails validation.
 2. **The agent references the model as `<connection-name>/<model-name>`** — e.g.
    `apim-azure-vm/qwen2.5-1.5b-instruct`. [`shared/config.py`](shared/config.py) owns both halves so nothing
    else has to guess.
+3. **The connection stores no secret.** It is registered with `authType: "AAD"` and an empty credentials
+   object, so Foundry calls the gateway as the **project's own system-assigned managed identity** and Entra
+   mints a token per request. `setup_entra.py` puts that identity's application ID on the gateway's allow-list.
+   Setting `GATEWAY_AUTH_MODE=key` registers key-based connections instead, for comparison.
 
 #### The gateway has to answer a discovery probe
 
 This is undocumented and it is the single hardest thing to work out from the error messages.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as agent.py
+    participant F as Foundry Agent Service
+    participant G as APIM
+    participant B as Backend<br/>(any of the four)
+
+    A->>F: run agent, model = "apim-azure-vm/qwen2.5-1.5b-instruct"
+    F->>F: resolve the BYOM connection<br/>authType AAD -> token as the project MI
+
+    rect rgba(200,80,80,0.12)
+        Note over F,G: Discovery probe, before a single token is forwarded
+        F->>G: GET /v1/azure-vm/deployments/qwen2.5-1.5b-instruct
+        G-->>F: synthesised ARM deployment envelope<br/>(return-response in inbound, no backend call)
+    end
+
+    F->>G: POST /v1/azure-vm/chat/completions
+    G->>B: forwarded after policy
+    B-->>G: completion + usage
+    G-->>F: completion + usage
+    F-->>A: agent response
+```
 
 Before Foundry forwards a single token, its model gateway **validates the deployment** by calling
 `GET <connection-target>/deployments/<model-name>`. A route that only publishes `/chat/completions` returns 404
@@ -651,19 +804,28 @@ Closing line: **the four options differ in who owns the runtime, not in how you 
 | Fireworks (per token) | $0.06 / $0.22 per 1M in/out | **no** |
 | Foundry Local | $0 | no |
 
+Stop the expensive thing first, right after the demo:
+
 ```powershell
-# stop the expensive thing first, right after the demo
 uv run python 01-managed-compute/deploy_managed_compute.py --delete
+```
 
-# deallocate the VM between sessions (keeps the disk and the model cache)
+Deallocate the VM between sessions. This keeps the disk and the pulled model cache, so the next start is quick:
+
+```powershell
 az vm deallocate -g rg-self-hosting-spectrum -n vm-inference-shs01
+```
 
-# remove everything
+Remove everything:
+
+```powershell
 uv run python infra/scripts/teardown.py
 ```
 
 `teardown.py` deletes the managed compute deployment **first**, because it is the only resource that can run up a
-meaningful bill while you are reading the confirmation prompt.
+meaningful bill while you are reading the confirmation prompt. It finishes by **purging the soft-deleted Foundry
+account** — without that the name stays reserved for 48 hours and the next deploy fails with
+`FlagMustBeSetForRestore`, which reads like a template bug rather than a leftover tombstone.
 
 ---
 
@@ -671,7 +833,11 @@ meaningful bill while you are reading the confirmation prompt.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `401` from every route | `APIM_SUBSCRIPTION_KEY` holds the APIM **master** key. `deploy.py` writes it; `deploy_apis.py` replaces it with the `spectrum-demo` product key. | Re-run `deploy_apis.py`. Order matters. |
+| `401` from every route, keyless mode | No Entra token was sent, or it is for the wrong audience. | `az login --tenant <id>`, then confirm `ENTRA_AUDIENCE` in `.env` matches `spectrum-entra-audience` in APIM. |
+| `403 "not on the gateway allow-list"` | The caller's application ID is not in `spectrum-entra-client-ids`. | `uv run python infra/scripts/setup_entra.py`. Use `--show` to see the current list, `--add-client-id` to extend it. |
+| Agents `403` but `client.py` works | The Foundry project's managed identity is missing from the allow-list, or you used its **object** ID instead of its **application** ID. | Re-run `setup_entra.py`; it resolves object → application ID for you. |
+| `setup_entra.py` says the project has no managed identity | The project predates the identity block in `infra/modules/foundry.bicep`. | Re-run `deploy.py`, or add one in the portal under Foundry → your project → Identity. |
+| `401` from every route, key mode | `APIM_SUBSCRIPTION_KEY` holds the APIM **master** key. `deploy.py` writes it; `deploy_apis.py` replaces it with the `spectrum-demo` product key. | Re-run `deploy_apis.py`. Order matters. |
 | Option 3 returns `HTTP 500` after ~25s | NSG uses the `ApiManagement` service tag, which does not cover gateway→backend traffic. | Allow APIM's `outboundIpAddresses` explicitly (§5, Option 3). |
 | Option 3 returns `500` immediately, VM looks healthy | `ollama pull` ran under cloud-init with no `$HOME` and panicked. The daemon is up and listening but serving **no model**. | `export HOME=/root` before `ollama pull`. Already fixed in `cloud-init.yaml`. |
 | Option 4 returns `400 "Model … is not loaded"` | The model is cached but not resident. | `foundry model load <variant>`; `bootstrap.py` does this. |
@@ -689,7 +855,7 @@ meaningful bill while you are reading the confirmation prompt.
 | Agent fails with `Deployment name contains invalid characters` | The model name contains a colon — Ollama's `name:tag`. | Publish a colon-free alias with `ollama cp` (§7). |
 | Agent fails `403 … agents/write` | Subscription Contributor does not grant Foundry data-plane writes. | Assign **Foundry User** by GUID `53ca6127-…` (§7); the name "Azure AI User" no longer resolves. |
 | Agent fails `invalid_payload: The 'agent' property is deprecated` | Responses API renamed it. | Use `agent_reference`. |
-| Agent worked, then started failing 401 after a redeploy | `deploy_apis.py` rotates `APIM_SUBSCRIPTION_KEY`, invalidating the key stored inside the Foundry connections. | **Always re-run `register_connections.py` after `deploy_apis.py`.** |
+| Agent worked, then started failing 401 after a redeploy | `deploy_apis.py` rotates `APIM_SUBSCRIPTION_KEY`, invalidating the key stored inside the Foundry connections. **Does not happen in the keyless default**, where connections store no key at all. | **Always re-run `register_connections.py` after `deploy_apis.py`** in key mode. |
 | `az` commands hit the wrong tenant | A different default subscription. | `az account set --subscription <id>` before anything else. |
 | `uv` cannot reach PyPI | Corporate TLS interception on `files.pythonhosted.org`. | Point `uv` at an internal index with a `uv.toml`. `uv` does **not** read `pip.ini`. |
 
@@ -704,7 +870,14 @@ meaningful bill while you are reading the confirmation prompt.
   [`llm-emit-token-metric`](https://learn.microsoft.com/azure/api-management/llm-emit-token-metric-policy) ·
   [`llm-content-safety`](https://learn.microsoft.com/azure/api-management/llm-content-safety-policy)
 - [`authentication-managed-identity`](https://learn.microsoft.com/azure/api-management/authentication-managed-identity-policy)
+- [`validate-azure-ad-token`](https://learn.microsoft.com/azure/api-management/validate-azure-ad-token-policy)
+- [Protect an API with Microsoft Entra ID](https://learn.microsoft.com/azure/api-management/api-management-howto-protect-backend-with-aad)
 - [Self-hosted gateway overview](https://learn.microsoft.com/azure/api-management/self-hosted-gateway-overview)
+
+**Entra ID and managed identity**
+- [Managed identities for Azure resources](https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/overview)
+- [Access tokens and the `appid` claim](https://learn.microsoft.com/entra/identity-platform/access-token-claims-reference)
+- [`DefaultAzureCredential`](https://learn.microsoft.com/python/api/overview/azure/identity-readme)
 
 **Foundry**
 - [Foundry Managed Compute overview](https://learn.microsoft.com/azure/ai-foundry/concepts/managed-compute-overview)

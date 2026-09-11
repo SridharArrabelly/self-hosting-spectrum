@@ -9,3 +9,6 @@ param foundryAudience = readEnvironmentVariable('FOUNDRY_AAD_AUDIENCE', 'https:/
 param vmBackendUrl = readEnvironmentVariable('VM_BACKEND_URL', '')
 param foundryLocalBackendUrl = readEnvironmentVariable('FOUNDRY_LOCAL_BACKEND_URL', '')
 param managedComputeDeploymentName = readEnvironmentVariable('MC_DEPLOYMENT_NAME', '')
+param gatewayAuthMode = readEnvironmentVariable('GATEWAY_AUTH_MODE', 'entra')
+param entraAudience = readEnvironmentVariable('ENTRA_AUDIENCE', 'https://cognitiveservices.azure.com')
+param entraAllowedClientIds = readEnvironmentVariable('ENTRA_ALLOWED_CLIENT_IDS', '')

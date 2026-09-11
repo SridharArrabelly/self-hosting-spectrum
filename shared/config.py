@@ -113,10 +113,26 @@ class Settings:
     apim_gateway_url: str
     apim_subscription_key: str
 
+    gateway_auth_mode: str
+    """``entra`` (keyless, the default), ``key``, or ``both``."""
+
+    entra_audience: str
+    """Resource the gateway token is requested for."""
+
     foundry_endpoint: str
     foundry_project_endpoint: str
 
     raw: dict[str, str]
+
+    @property
+    def uses_entra(self) -> bool:
+        """True unless the gateway was explicitly put into key-only mode.
+
+        ``both`` counts as Entra for clients: if the gateway accepts either, a
+        client should still prefer the credential that is short-lived and tied
+        to a real identity.
+        """
+        return self.gateway_auth_mode.strip().lower() != "key"
 
     def model_for(self, option: Option) -> str:
         return self.raw.get(option.model_env_var) or option.default_model
@@ -151,6 +167,8 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         name_suffix=raw.get("NAME_SUFFIX", "shs01"),
         apim_gateway_url=raw.get("APIM_GATEWAY_URL", ""),
         apim_subscription_key=raw.get("APIM_SUBSCRIPTION_KEY", ""),
+        gateway_auth_mode=raw.get("GATEWAY_AUTH_MODE", "entra"),
+        entra_audience=raw.get("ENTRA_AUDIENCE", "https://cognitiveservices.azure.com"),
         foundry_endpoint=raw.get("FOUNDRY_ENDPOINT", ""),
         foundry_project_endpoint=raw.get("FOUNDRY_PROJECT_ENDPOINT", ""),
         raw=raw,

@@ -80,5 +80,14 @@ output openAiV1Endpoint string = '${account.properties.endpoint}openai/v1'
 output projectName string = project.name
 output projectId string = project.id
 
+@description('''
+Object ID of the project's system-assigned managed identity. This is the
+identity Foundry Agent Service presents when it calls the gateway on an agent's
+behalf, so it is what the APIM allow-list has to contain. Note this is the
+*object* ID; infra/scripts/setup_entra.py resolves it to the application
+(client) ID that actually appears in the token's appid claim.
+''')
+output projectPrincipalId string = project.identity.principalId
+
 @description('Endpoint consumed by azure-ai-projects (AIProjectClient).')
 output projectEndpoint string = '${account.properties.endpoint}api/projects/${project.name}'

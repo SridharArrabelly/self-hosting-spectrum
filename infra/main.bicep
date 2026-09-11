@@ -164,6 +164,8 @@ output foundryAccountName string = foundry.outputs.accountName
 output foundryEndpoint string = foundry.outputs.endpoint
 output foundryOpenAiV1Endpoint string = foundry.outputs.openAiV1Endpoint
 output foundryProjectEndpoint string = foundry.outputs.projectEndpoint
+output foundryProjectName string = foundry.outputs.projectName
+output foundryProjectPrincipalId string = foundry.outputs.projectPrincipalId
 
 output fireworksDeploymentName string = deployFireworks ? fireworks!.outputs.deploymentName : ''
 output vmBackendUrl string = deployVm ? vm!.outputs.backendUrl : ''

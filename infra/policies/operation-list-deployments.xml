@@ -7,6 +7,16 @@
 
   Answered in policy for the same reason as operation-get-deployment.xml - the
   backends are not Azure OpenAI and cannot describe themselves this way.
+
+  Two array shapes are emitted because an ApiManagement connection parses this
+  response according to its deploymentProvider setting, and the two supported
+  values disagree about where the list lives:
+
+    AzureOpenAI (the default)  "value", ARM-style, name + properties.model
+    OpenAI                     "data",  flat, id doubles as the model name
+
+  Emitting both costs one extra array and means the route works whichever
+  provider the connection is configured with.
 -->
 <policies>
   <inbound>
@@ -22,15 +32,27 @@
         var id = parts[parts.Length - 1];
         return new JObject(
           new JProperty("object", "list"),
+          new JProperty("value", new JArray(
+            new JObject(
+              new JProperty("name", id),
+              new JProperty("properties", new JObject(
+                new JProperty("model", new JObject(
+                  new JProperty("format", "OpenAI"),
+                  new JProperty("name", id),
+                  new JProperty("version", "1")
+                )),
+                new JProperty("provisioningState", "Succeeded"),
+                new JProperty("capabilities", new JObject(
+                  new JProperty("chatCompletion", "true")
+                ))
+              ))
+            )
+          )),
           new JProperty("data", new JArray(
             new JObject(
               new JProperty("id", id),
-              new JProperty("object", "deployment"),
-              new JProperty("model", id),
-              new JProperty("status", "succeeded"),
-              new JProperty("capabilities", new JObject(
-                new JProperty("chatCompletion", "true")
-              ))
+              new JProperty("object", "model"),
+              new JProperty("owned_by", "self-hosting-spectrum")
             )
           ))
         ).ToString();

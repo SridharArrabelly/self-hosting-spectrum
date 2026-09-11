@@ -31,6 +31,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import httpx  # noqa: E402
 
+from shared.auth import describe as describe_auth  # noqa: E402
+from shared.auth import gateway_credential  # noqa: E402
 from shared.config import OPTIONS, Option, Settings, get_option, load_settings  # noqa: E402
 
 PROMPT = "List three benefits of running an LLM on your own infrastructure. Be brief."
@@ -109,9 +111,10 @@ def one_call(client: httpx.Client, settings: Settings, option: Option) -> tuple[
 
 def measure(settings: Settings, option: Option, runs: int, warmup: bool, pause: float = 0.0) -> Result:
     result = Result(option=option)
+    credential, auth_headers = gateway_credential(settings)
     headers = {
-        "Ocp-Apim-Subscription-Key": settings.apim_subscription_key,
-        "Authorization": f"Bearer {settings.apim_subscription_key}",
+        **auth_headers,
+        "Authorization": f"Bearer {credential}",
         "Content-Type": "application/json",
     }
     label = f"Option {option.number} ({option.key})"
@@ -216,10 +219,9 @@ def main() -> int:
     args = parser.parse_args()
 
     settings = load_settings()
-    if not settings.apim_subscription_key:
-        raise SystemExit("APIM_SUBSCRIPTION_KEY is not set. Run infra/scripts/deploy_apis.py first.")
 
     print(f"Gateway: {settings.apim_gateway_url}")
+    print(describe_auth(settings))
     print(f"Prompt : {PROMPT}\n")
 
     results = [measure(settings, get_option(n), args.runs, not args.no_warmup, args.pause)

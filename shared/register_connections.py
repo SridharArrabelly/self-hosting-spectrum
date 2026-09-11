@@ -17,10 +17,15 @@ Two details that decide whether this works:
 
   * Foundry appends `chat/completions` to whatever base URL is registered. The
     route shape in this repo (/v1/<option>) was chosen so that append produces
-    exactly the right URL. Leave "include deployment name in URL path" off.
+    exactly the right URL. Leave "include deployment name in URL path" off,
+    which is what `deploymentInPath: "false"` does here.
   * The agent then references the model as `<connection-name>/<model-name>`.
     shared/config.py owns both halves of that string so nothing else has to
     guess it.
+
+By default the connection stores no secret: it authenticates as the Foundry
+project's own managed identity, and APIM validates the resulting Entra token.
+Set GATEWAY_AUTH_MODE=key to register key-based connections instead.
 
 Responsible AI note: BYOM models are Non-Microsoft Products. Azure's built-in
 content filters do not apply to them, and you own the mitigations. That is the
@@ -40,6 +45,7 @@ from azure.core.exceptions import HttpResponseError, ResourceNotFoundError  # no
 from azure.identity import AzureCliCredential  # noqa: E402
 from azure.mgmt.cognitiveservices import CognitiveServicesManagementClient  # noqa: E402
 from azure.mgmt.cognitiveservices.models import (  # noqa: E402
+    AADAuthTypeConnectionProperties,
     ApiKeyAuthConnectionProperties,
     ConnectionApiKey,
     ConnectionPropertiesV2BasicResource,
@@ -65,20 +71,61 @@ def connection_target(settings: Settings, option: Option) -> str:
     return settings.base_url_for(option).rstrip("/") + "/"
 
 
+def connection_metadata(settings: Settings, option: Option) -> dict[str, str]:
+    """Metadata Foundry reads, plus a few fields that only help a human.
+
+    ``deploymentInPath`` is not optional despite the name: the documentation is
+    explicit that a connection without it fails validation. ``false`` is correct
+    here because these routes take the model in the request body and end at
+    ``/chat/completions``, exactly like the OpenAI API. Setting ``true`` would
+    make Foundry build ``.../v1/azure-vm/<model>/chat/completions``, which no
+    route in this repository serves.
+
+    The rest is descriptive. Foundry ignores it; it shows up in the portal and
+    makes `--list` readable.
+    """
+    return {
+        "deploymentInPath": "false",
+        "audience": settings.entra_audience,
+        "option": str(option.number),
+        "hostingPattern": option.title,
+        "runtimeOwner": option.runtime_owner,
+        "model": settings.model_for(option),
+    }
+
+
 def build_connection(settings: Settings, option: Option) -> ConnectionPropertiesV2BasicResource:
-    """An ApiManagement connection pointing at one route."""
+    """An ApiManagement connection pointing at one route.
+
+    Two auth shapes, and the keyless one is the default:
+
+      AAD     Foundry calls the gateway as the project's own managed identity.
+              No secret is stored on the connection at all - the credentials
+              object is deliberately empty, and Entra mints a token per call.
+              This requires the project to have a managed identity and APIM to
+              accept tokens for `entra_audience`, both of which the Bicep and
+              infra/scripts/setup_entra.py arrange.
+
+      ApiKey  The APIM subscription key, stored on the connection. Kept because
+              it is the shape most existing deployments are in, and switching
+              between the two here is the whole demonstration.
+    """
+    common = {
+        "category": "ApiManagement",
+        "target": connection_target(settings, option),
+        "is_shared_to_all": True,
+        "metadata": connection_metadata(settings, option),
+    }
+
+    if settings.uses_entra:
+        return ConnectionPropertiesV2BasicResource(
+            properties=AADAuthTypeConnectionProperties(**common)
+        )
+
     return ConnectionPropertiesV2BasicResource(
         properties=ApiKeyAuthConnectionProperties(
-            category="ApiManagement",
-            target=connection_target(settings, option),
             credentials=ConnectionApiKey(key=settings.apim_subscription_key),
-            is_shared_to_all=True,
-            metadata={
-                "option": str(option.number),
-                "hostingPattern": option.title,
-                "runtimeOwner": option.runtime_owner,
-                "model": settings.model_for(option),
-            },
+            **common,
         )
     )
 
@@ -154,12 +201,15 @@ def main() -> int:
             delete(settings, option, account, project)
         return 0
 
-    if not settings.apim_subscription_key:
+    if not settings.uses_entra and not settings.apim_subscription_key:
         raise SystemExit(
-            "APIM_SUBSCRIPTION_KEY is not set. Run infra/scripts/deploy_apis.py first."
+            "GATEWAY_AUTH_MODE=key but APIM_SUBSCRIPTION_KEY is not set. "
+            "Run infra/scripts/deploy_apis.py first."
         )
 
-    print(f"Registering {len(targets)} connection(s) on {account}/{project}\n")
+    auth = "managed identity (keyless)" if settings.uses_entra else "APIM subscription key"
+    print(f"Registering {len(targets)} connection(s) on {account}/{project}")
+    print(f"Auth: {auth}\n")
     results = [register(settings, option, account, project) for option in targets]
 
     print("\nUse them from an agent with:")

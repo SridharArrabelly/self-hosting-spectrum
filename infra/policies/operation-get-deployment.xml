@@ -28,13 +28,16 @@
           ? context.Request.MatchedParameters["deploymentId"]
           : "default";
 
-        // Deliberately a superset of two shapes. Foundry's model gateway parses
-        // this as an "AzureOpenAI" provider deployment and wants the ARM-style
-        // envelope (name / properties.model / sku); older Azure OpenAI
-        // data-plane clients want the flat one (object / model / status /
-        // scale_settings). Returning only the flat shape fails with
+        // Deliberately a superset of the two documented discovery shapes. An
+        // ApiManagement connection parses this according to its
+        // deploymentProvider setting, and the two supported values disagree:
+        //
+        //   AzureOpenAI (the default)  ARM-style, name + properties.model
+        //   OpenAI                     flat, id doubles as the model name
+        //
+        // Returning only the flat shape against the default provider fails with
         // "Failed to parse deployment response ... from provider 'AzureOpenAI'".
-        // Emitting both costs nothing and satisfies either reader.
+        // Emitting both satisfies either reader at no cost.
         return new JObject(
           new JProperty("id", id),
           new JProperty("name", id),

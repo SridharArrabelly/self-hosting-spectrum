@@ -21,6 +21,23 @@ param loggerId string
 @description('Per-route token budget enforced by llm-token-limit.')
 param tokensPerMinute int = 20000
 
+@description('How callers authenticate to the gateway. "entra" is keyless and the default; "key" is the subscription-key fallback; "both" accepts either while you migrate.')
+@allowed([
+  'entra'
+  'key'
+  'both'
+])
+param gatewayAuthMode string = 'entra'
+
+@description('Tenant whose tokens the gateway will accept.')
+param tenantId string = tenant().tenantId
+
+@description('Audience the caller must request a token for. Must match the Audience set on the Foundry BYOM connection.')
+param entraAudience string = 'https://cognitiveservices.azure.com'
+
+@description('Optional comma-separated Entra application (client) IDs allowed to call the gateway. Empty means any client in the tenant holding a token for the audience. Populated by infra/scripts/setup_entra.py.')
+param entraAllowedClientIds string = ''
+
 @description('Entra audience APIM requests a token for when calling Foundry. Learn documents two; this is the one to flip if you get a 401.')
 @allowed([
   'https://cognitiveservices.azure.com'
@@ -105,6 +122,51 @@ resource nvFoundryAudience 'Microsoft.ApiManagement/service/namedValues@2024-05-
   }
 }
 
+// --- Entra (keyless) inbound auth ------------------------------------------
+// These four drive the validate-azure-ad-token block in fragment-llm-common.xml.
+// They are named values rather than literals so the gateway can be switched
+// between keyless and key auth without touching policy XML.
+
+resource nvAuthMode 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
+  parent: apim
+  name: 'spectrum-auth-mode'
+  properties: {
+    displayName: 'spectrum-auth-mode'
+    value: gatewayAuthMode
+  }
+}
+
+resource nvTenantId 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
+  parent: apim
+  name: 'spectrum-tenant-id'
+  properties: {
+    displayName: 'spectrum-tenant-id'
+    value: tenantId
+  }
+}
+
+resource nvEntraAudience 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
+  parent: apim
+  name: 'spectrum-entra-audience'
+  properties: {
+    displayName: 'spectrum-entra-audience'
+    value: entraAudience
+  }
+}
+
+// Comma-separated, and deliberately allowed to be empty: an empty list means
+// "any client in the tenant that holds a token for the audience". The policy
+// treats empty as skip-the-check rather than deny-everything, so a gateway is
+// never accidentally bricked by an unset value.
+resource nvEntraClientIds 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
+  parent: apim
+  name: 'spectrum-entra-client-ids'
+  properties: {
+    displayName: 'spectrum-entra-client-ids'
+    value: empty(entraAllowedClientIds) ? ' ' : entraAllowedClientIds
+  }
+}
+
 resource nvManagedComputeUrl 'Microsoft.ApiManagement/service/namedValues@2024-05-01' = {
   parent: apim
   name: 'mc-backend-url'
@@ -154,6 +216,10 @@ resource llmCommonFragment 'Microsoft.ApiManagement/service/policyFragments@2024
   dependsOn: [
     nvGatewayKey
     nvTokensPerMinute
+    nvAuthMode
+    nvTenantId
+    nvEntraAudience
+    nvEntraClientIds
   ]
 }
 

@@ -30,6 +30,29 @@ param vmBackendUrl string = ''
 @description('Option 4 Dev Tunnel URL. Empty leaves the route stubbed.')
 param foundryLocalBackendUrl string = ''
 
+@description('How callers authenticate to the gateway. "entra" is keyless and the default.')
+@allowed([
+  'entra'
+  'key'
+  'both'
+])
+param gatewayAuthMode string = 'entra'
+
+@description('''
+Audience callers must request a token for. This has to match the Audience field
+on the Foundry BYOM connection, because the same gateway accepts both the
+developer running client.py and the Foundry project managed identity calling on
+an agent's behalf.
+''')
+param entraAudience string = 'https://cognitiveservices.azure.com'
+
+@description('''
+Comma-separated Entra application (client) IDs allowed through the gateway.
+Empty means any client in the tenant holding a token for the audience.
+infra/scripts/setup_entra.py discovers the right values and writes them out.
+''')
+param entraAllowedClientIds string = ''
+
 @description('''
 Name of the Option 1 managed compute deployment. Managed compute does NOT share
 the /openai/v1 route with the rest of the account - each deployment gets its own
@@ -78,6 +101,9 @@ module apis 'modules/apim-apis.bicep' = {
     fireworksBackendUrl: foundryOpenAiV1
     vmBackendUrl: vmBackendUrl
     foundryLocalBackendUrl: foundryLocalBackendUrl
+    gatewayAuthMode: gatewayAuthMode
+    entraAudience: entraAudience
+    entraAllowedClientIds: entraAllowedClientIds
   }
 }
 

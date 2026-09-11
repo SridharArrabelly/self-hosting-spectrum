@@ -5,9 +5,12 @@
     uv run python shared/client.py --option 3 --prompt "Explain vLLM in one sentence."
 
 This is the proof the repository exists to make. The same OpenAI client object,
-the same request body, the same auth header - only the path segment changes -
-and behind it the model is running on Foundry-managed GPUs, on a partner's
+the same request body, the same credential - only the path segment changes - and
+behind it the model is running on Foundry-managed GPUs, on a partner's
 serverless capacity, on a VM you own, or on the laptop this script is typed on.
+
+Authentication is keyless by default: `az login` is the only credential, and the
+token works against all four routes identically.
 
 If this script needs an `if option == ...` branch to talk to a backend, the
 gateway is not doing its job. It does not have one.
@@ -25,6 +28,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from openai import APIStatusError, OpenAI  # noqa: E402
 
+from shared.auth import describe as describe_auth  # noqa: E402
+from shared.auth import gateway_credential  # noqa: E402
 from shared.config import OPTIONS, Option, Settings, get_option, load_settings  # noqa: E402
 
 DEFAULT_PROMPT = "In one sentence, what is the difference between renting a GPU and renting tokens?"
@@ -49,31 +54,25 @@ class Result:
 def build_client(settings: Settings, option: Option, timeout: float) -> OpenAI:
     """An ordinary OpenAI client pointed at an APIM route.
 
-    The key goes in two places on purpose. The OpenAI SDK always sends
-    `Authorization: Bearer <api_key>`; APIM's own convention is
-    `Ocp-Apim-Subscription-Key`. The gateway policy accepts either, so sending
-    both means this same client also works against a stock Azure OpenAI
-    endpoint or a raw Ollama server with no code change.
+    Nothing here knows how the caller is authenticated. shared/auth.py returns
+    whatever credential the gateway is configured for, and by default that is a
+    short-lived Entra token obtained from `az login` - no shared secret exists
+    anywhere in the system.
     """
-    if not settings.apim_subscription_key:
-        raise SystemExit(
-            "APIM_SUBSCRIPTION_KEY is not set. Run infra/scripts/deploy_apis.py, "
-            "which writes it into .env."
-        )
+    credential, auth_headers = gateway_credential(settings)
 
     return OpenAI(
         base_url=settings.base_url_for(option),
-        api_key=settings.apim_subscription_key,
+        api_key=credential,
         timeout=timeout,
         max_retries=0,
         default_headers={
-            "Ocp-Apim-Subscription-Key": settings.apim_subscription_key,
+            **auth_headers,
             # Read by llm-emit-token-metric so App Insights can split cost and
             # latency by hosting option in a single chart.
             "x-shs-option": option.key,
         },
     )
-
 
 def call(settings: Settings, option: Option, prompt: str, max_tokens: int, timeout: float) -> Result:
     model = settings.model_for(option)
@@ -180,6 +179,7 @@ def main() -> int:
 
     print(f'Prompt: "{args.prompt}"')
     print(f"Gateway: {settings.apim_gateway_url or '(APIM_GATEWAY_URL not set)'}")
+    print(describe_auth(settings))
 
     results = [call(settings, option, args.prompt, args.max_tokens, args.timeout) for option in targets]
     for result in results:

@@ -18,54 +18,138 @@
 -->
 <fragment>
   <!--
-    Credential normalisation.
+    Inbound authentication.
 
-    APIM validates its own subscription key before any policy runs, which means
-    a policy cannot rescue a client that sends the key in an unexpected place.
-    So the APIs are declared with subscriptionRequired=false and the check is
-    done here instead, accepting every shape a real client might use:
+    Two modes, selected by the spectrum-auth-mode named value:
 
-      Ocp-Apim-Subscription-Key   APIM native, curl and the docs
-      api-key                     Azure OpenAI SDK, Foundry BYOM connections
-      Authorization: Bearer <k>   the OpenAI SDK, which cannot be told otherwise
-      ?subscription-key=<k>       browsers and quick links
+      entra   Microsoft Entra bearer tokens only. No shared secret exists
+              anywhere in the system. This is the default.
+      key     APIM subscription key, for clients that cannot obtain a token.
+      both    Accept either, which is what a real migration looks like.
 
-    Accepting all four is what lets one unmodified OpenAI client hit every
-    route. Swap this block for validate-azure-ad-token to move to Entra.
+    APIM validates its own subscription key before any policy runs, so a policy
+    cannot rescue a client that sends a key in an unexpected place. The APIs are
+    therefore declared with subscriptionRequired=false and both checks happen
+    here instead.
   -->
-  <set-variable name="credential" value="@{
-      var headers = context.Request.Headers;
-      var value = headers.GetValueOrDefault("Ocp-Apim-Subscription-Key", string.Empty);
-      if (string.IsNullOrEmpty(value)) {
-          value = headers.GetValueOrDefault("api-key", string.Empty);
-      }
-      if (string.IsNullOrEmpty(value)) {
-          var authorization = headers.GetValueOrDefault("Authorization", string.Empty);
-          if (authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) {
-              value = authorization.Substring("Bearer ".Length).Trim();
-          }
-      }
-      if (string.IsNullOrEmpty(value)) {
-          value = context.Request.Url.Query.GetValueOrDefault("subscription-key", string.Empty);
-      }
-      return value;
-  }" />
   <choose>
-    <when condition="@(!string.Equals((string)context.Variables["credential"], "{{spectrum-gateway-key}}", StringComparison.Ordinal))">
-      <return-response>
-        <set-status code="401" reason="Unauthorized" />
-        <set-header name="Content-Type" exists-action="override">
-          <value>application/json</value>
-        </set-header>
-        <set-body>{"error":{"code":"Unauthorized","message":"Supply the gateway key as Ocp-Apim-Subscription-Key, api-key, or Authorization: Bearer [key]."}}</set-body>
-      </return-response>
+    <!-- Keyless. Validate a Microsoft Entra token. -->
+    <when condition="@(!string.Equals("{{spectrum-auth-mode}}", "key", StringComparison.OrdinalIgnoreCase))">
+      <validate-azure-ad-token
+        tenant-id="{{spectrum-tenant-id}}"
+        header-name="Authorization"
+        output-token-variable-name="jwt"
+        failed-validation-httpcode="401"
+        failed-validation-error-message="Unauthorized. Send an Entra bearer token for audience {{spectrum-entra-audience}}."
+        require-expiration-time="true"
+        require-signed-tokens="true">
+        <audiences>
+          <audience>{{spectrum-entra-audience}}</audience>
+        </audiences>
+      </validate-azure-ad-token>
+
+      <!--
+        Read the calling application out of the token.
+
+        Jwt.Claims maps each claim to a string[], not a string, so every read
+        goes through ContainsKey plus FirstOrDefault. appid is the v1 claim and
+        azp the v2 one. Tokens for the Cognitive Services audience are v1
+        today, but both are read so this cannot quietly start returning nothing
+        if that changes.
+      -->
+      <set-variable name="callerAppId" value="@{
+          var jwt = (Jwt)context.Variables["jwt"];
+          var appId = jwt.Claims.ContainsKey("appid") ? jwt.Claims["appid"].FirstOrDefault() : null;
+          if (string.IsNullOrEmpty(appId) && jwt.Claims.ContainsKey("azp")) {
+              appId = jwt.Claims["azp"].FirstOrDefault();
+          }
+          return string.IsNullOrEmpty(appId) ? "unknown" : appId;
+      }" />
+
+      <!--
+        Optional caller allow-list.
+
+        validate-azure-ad-token has a client-application-ids element, but it
+        takes one literal child per id and a named value cannot expand into
+        several elements. Checking the claim here keeps the whole list in a
+        single named value that setup_entra.py can rewrite without a policy
+        redeployment.
+
+        An empty list means "any client in this tenant holding a token for the
+        audience", so an unset value degrades to the documented default instead
+        of locking everybody out.
+      -->
+      <choose>
+        <when condition="@{
+            var allowed = "{{spectrum-entra-client-ids}}".Trim();
+            if (string.IsNullOrEmpty(allowed)) { return false; }
+            var caller = (string)context.Variables["callerAppId"];
+            return !allowed.Split(',').Select(x => x.Trim()).Contains(caller);
+        }">
+          <return-response>
+            <set-status code="403" reason="Forbidden" />
+            <set-header name="Content-Type" exists-action="override">
+              <value>application/json</value>
+            </set-header>
+            <set-body>{"error":{"code":"Forbidden","message":"Token is valid but this application is not on the gateway allow-list."}}</set-body>
+          </return-response>
+        </when>
+      </choose>
+
+      <!-- Record who called, so App Insights can tell the clients apart. -->
+      <set-header name="x-shs-caller" exists-action="override">
+        <value>@((string)context.Variables["callerAppId"])</value>
+      </set-header>
     </when>
+
+    <!--
+      Fallback. Shared subscription key, accepted in every shape a real client
+      might send it, because one unmodified OpenAI client has to reach every
+      route:
+
+        Ocp-Apim-Subscription-Key   APIM native, curl and the docs
+        api-key                     Azure OpenAI SDK, Foundry BYOM connections
+        Authorization header        the OpenAI SDK, which cannot be told otherwise
+        ?subscription-key=<k>       browsers and quick links
+    -->
+    <otherwise>
+      <set-variable name="credential" value="@{
+          var headers = context.Request.Headers;
+          var value = headers.GetValueOrDefault("Ocp-Apim-Subscription-Key", string.Empty);
+          if (string.IsNullOrEmpty(value)) {
+              value = headers.GetValueOrDefault("api-key", string.Empty);
+          }
+          if (string.IsNullOrEmpty(value)) {
+              var authorization = headers.GetValueOrDefault("Authorization", string.Empty);
+              var scheme = "Bearer ";
+              if (authorization.StartsWith(scheme, StringComparison.OrdinalIgnoreCase)) {
+                  value = authorization.Substring(scheme.Length).Trim();
+              }
+          }
+          if (string.IsNullOrEmpty(value)) {
+              value = context.Request.Url.Query.GetValueOrDefault("subscription-key", string.Empty);
+          }
+          return value;
+      }" />
+      <choose>
+        <when condition="@(!string.Equals((string)context.Variables["credential"], "{{spectrum-gateway-key}}", StringComparison.Ordinal))">
+          <return-response>
+            <set-status code="401" reason="Unauthorized" />
+            <set-header name="Content-Type" exists-action="override">
+              <value>application/json</value>
+            </set-header>
+            <set-body>{"error":{"code":"Unauthorized","message":"Supply the gateway key as Ocp-Apim-Subscription-Key, api-key, or the Authorization header."}}</set-body>
+          </return-response>
+        </when>
+      </choose>
+    </otherwise>
   </choose>
 
   <!--
     Strip the caller's credentials before the request leaves the gateway.
-    Each API then attaches its own backend credential, so a key that is valid
-    at the gateway is never replayed against Foundry, the VM, or the laptop.
+    Each API then attaches its own backend credential, so a token or key that
+    is valid at the gateway is never replayed against Foundry, the VM, or the
+    laptop.
   -->
   <set-header name="Ocp-Apim-Subscription-Key" exists-action="delete" />
   <set-header name="api-key" exists-action="delete" />

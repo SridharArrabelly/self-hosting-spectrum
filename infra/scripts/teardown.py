@@ -83,7 +83,7 @@ def managed_compute_client(subscription_id: str):
 
 def delete_managed_compute(settings, *, assume_yes: bool, wait: bool) -> None:
     account = f"aif-spectrum-{settings.name_suffix}"
-    print("\n[1/3] Managed compute deployments (billed per accelerator-hour)")
+    print("\n[1/4] Managed compute deployments (billed per accelerator-hour)")
 
     try:
         client = managed_compute_client(settings.subscription_id)
@@ -149,7 +149,7 @@ def wait_for_terminal(client, rg: str, account: str, name: str, timeout_s: int =
 
 def deallocate_vm(settings, *, assume_yes: bool) -> None:
     vm = f"vm-inference-{settings.name_suffix}"
-    print(f"\n[2/3] VM {vm} (~$0.19/hr while running)")
+    print(f"\n[2/4] VM {vm} (~$0.19/hr while running)")
 
     probe = run_az(
         ["vm", "show", "-g", settings.resource_group, "-n", vm, "-o", "none"], check=False
@@ -174,7 +174,7 @@ def deallocate_vm(settings, *, assume_yes: bool) -> None:
 
 def delete_resource_group(settings, *, assume_yes: bool, wait: bool) -> None:
     rg = settings.resource_group
-    print(f"\n[3/3] Resource group {rg} (APIM, Foundry, VM, networking, observability)")
+    print(f"\n[3/4] Resource group {rg} (APIM, Foundry, VM, networking, observability)")
 
     probe = run_az(["group", "show", "-n", rg, "-o", "none"], check=False)
     if probe.returncode != 0:
@@ -192,6 +192,47 @@ def delete_resource_group(settings, *, assume_yes: bool, wait: bool) -> None:
     print("      deleting ..." + ("" if wait else " (async - not waiting)"))
     run_az(args)
     print("      resource group delete " + ("completed." if wait else "started."))
+
+
+# --------------------------------------------------------------------------- #
+# 4. Purge the soft-deleted Foundry account
+# --------------------------------------------------------------------------- #
+
+
+def purge_foundry(settings, *, wait: bool) -> None:
+    """Remove the tombstone a deleted Cognitive Services account leaves behind.
+
+    Deleting the resource group does not fully delete a Foundry account. It goes
+    into a soft-deleted state for 48 hours, and the name stays reserved. Redeploy
+    into the same resource group and Bicep fails with FlagMustBeSetForRestore -
+    which reads like a template bug and is really a leftover tombstone.
+
+    Purging is unconditional here: the whole point of running teardown is to be
+    able to deploy again tomorrow.
+    """
+    account = f"aif-spectrum-{settings.name_suffix}"
+    print(f"\n[4/4] Soft-deleted Foundry account {account}")
+
+    if not wait:
+        print("      skipped: --no-wait means the group delete has not finished, and")
+        print("      the account cannot be purged until it has. Re-run teardown later,")
+        print("      or purge manually:")
+        print(f"      az cognitiveservices account purge -n {account} "
+              f"-g {settings.resource_group} -l {settings.location}")
+        return
+
+    probe = run_az([
+        "cognitiveservices", "account", "purge",
+        "-n", account,
+        "-g", settings.resource_group,
+        "-l", settings.location,
+    ], check=False)
+
+    if probe.returncode == 0:
+        print("      purged - the name is free to reuse immediately.")
+    else:
+        # Nothing to purge is the common case and is not an error.
+        print("      nothing to purge (or already gone).")
 
 
 def local_cleanup_hints(settings) -> None:
@@ -243,6 +284,7 @@ def main() -> int:
         return 0
 
     delete_resource_group(settings, assume_yes=args.yes, wait=not args.no_wait)
+    purge_foundry(settings, wait=not args.no_wait)
     local_cleanup_hints(settings)
     print("\nDone.")
     return 0
