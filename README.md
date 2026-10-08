@@ -877,6 +877,55 @@ Make three points before calling a model:
 * APIM validates a short-lived Entra token; the repository does not distribute backend keys to clients.
 * The shared fragment applies the same rate limit and telemetry policy to all four routes.
 
+#### Test Option 2 from the APIM portal
+
+The portal's **Test** console does not obtain the custom Entra token automatically. Generate a short-lived token
+for the gateway audience in PowerShell:
+
+```powershell
+$token = az account get-access-token `
+  --tenant b1cd5b73-a77b-4002-a5a6-1599e4c4ee37 `
+  --resource https://cognitiveservices.azure.com `
+  --query accessToken -o tsv
+
+Set-Clipboard "Bearer $token"
+```
+
+In **API Management → APIs → 02 - Fireworks on Foundry**:
+
+1. Select **Create chat completion**, then open the **Test** tab.
+2. Under **Headers**, add `Authorization` and paste the clipboard value. It must begin with `Bearer `.
+3. Add `Content-Type` with value `application/json`.
+4. Optional telemetry headers: `x-shs-option: fireworks` and `x-shs-model: fireworks`.
+5. Select **Raw** and paste this request body:
+
+   ```json
+   {
+     "model": "fireworks",
+     "messages": [
+       {
+         "role": "user",
+         "content": "Reply with exactly: Fireworks route is working."
+       }
+     ],
+     "max_tokens": 128,
+     "temperature": 0
+   }
+   ```
+
+6. Select **Send**. Fireworks may take 30–60 seconds on a cold request.
+
+Expect HTTP `200`, an OpenAI-compatible `choices` array, a `usage` object, and response headers including
+`x-shs-route: fireworks`. Do **not** add an APIM subscription key: this gateway is configured for Entra-only
+authentication. The request body's model is the deployment name `fireworks`; the catalog model behind it is
+`FW-Nemotron-Lightning-3.5-30B-A3B`.
+
+The bearer token is sensitive but short-lived. Clear it from the clipboard after the test:
+
+```powershell
+Set-Clipboard ""
+```
+
 ### Call each pattern with the same prompt
 
 Use one short prompt so the audience compares hosting rather than answer quality:
