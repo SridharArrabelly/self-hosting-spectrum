@@ -44,12 +44,12 @@ $ uv run python shared/client.py --all
 
 ## 1. The four options
 
-| # | Option | Who owns the runtime | Where it runs | Billing | Folder |
-|---|---|---|---|---|---|
-| 1 | **Foundry Managed Compute** | Microsoft Foundry | Azure, dedicated GPUs | **Per accelerator-hour**, even at zero traffic | [`01-managed-compute/`](01-managed-compute/) |
-| 2 | **Fireworks on Foundry** | Fireworks AI (partner) | Azure, shared serverless | Per token | [`02-fireworks-on-foundry/`](02-fireworks-on-foundry/) |
-| 3 | **Customer-managed Azure VM** | You | Azure, a VM you own | Per VM-hour | [`03-azure-gpu-vm/`](03-azure-gpu-vm/) |
-| 4 | **Foundry Local** | You | Your own machine | Free (your hardware) | [`04-foundry-local/`](04-foundry-local/) |
+| # | Option                              | Who owns the runtime   | Where it runs            | Billing                                              | Folder                                                  |
+| - | ----------------------------------- | ---------------------- | ------------------------ | ---------------------------------------------------- | ------------------------------------------------------- |
+| 1 | **Foundry Managed Compute**   | Microsoft Foundry      | Azure, dedicated GPUs    | **Per accelerator-hour**, even at zero traffic | [`01-managed-compute/`](01-managed-compute/)           |
+| 2 | **Fireworks on Foundry**      | Fireworks AI (partner) | Azure, shared serverless | Per token                                            | [`02-fireworks-on-foundry/`](02-fireworks-on-foundry/) |
+| 3 | **Customer-managed Azure VM** | You                    | Azure, a VM you own      | Per VM-hour                                          | [`03-azure-gpu-vm/`](03-azure-gpu-vm/)                 |
+| 4 | **Foundry Local**             | You                    | Your own machine         | Free (your hardware)                                 | [`04-foundry-local/`](04-foundry-local/)               |
 
 ### One question decides it
 
@@ -87,8 +87,8 @@ patching, scaling, and uptime. **Nothing above changes the API contract**, which
 flowchart TD
     client["shared/client.py --option 1|2|3|4<br/><i>identical payload, identical credential</i>"]
 
-    subgraph gateway["Azure API Management &mdash; Developer SKU, eastus2"]
-        policy["<b>Shared policy fragment</b><br/>validate-azure-ad-token &middot; caller allow-list<br/>llm-token-limit &middot; llm-emit-token-metric<br/>App Insights logging"]
+    subgraph gateway["Azure API Management — Developer SKU, eastus2"]
+        policy["<b>Shared policy fragment</b><br/>validate-azure-ad-token · caller allow-list<br/>llm-token-limit · llm-emit-token-metric<br/>App Insights logging"]
     end
 
     client -->|Entra bearer token| policy
@@ -108,7 +108,7 @@ flowchart TD
         o4["<b>4. Foundry Local</b><br/>via Dev Tunnel relay<br/>CPU / GPU / NPU, port 39839"]
     end
 
-    agents["Foundry Agent Service<br/><i>all four registered as BYOM connections</i><br/>model = &quot;&lt;connection&gt;/&lt;model&gt;&quot;"]
+    agents["Foundry Agent Service<br/><i>all four registered as BYOM connections</i><br/>model = "<connection>/<model>""]
     agents -->|managed identity token| policy
 
     classDef gw fill:#0b5394,stroke:#073763,color:#ffffff
@@ -159,13 +159,13 @@ self-hosting-spectrum/
 
 ## 3. Prerequisites
 
-| Tool | Why | Install |
-|---|---|---|
-| Azure CLI ≥ 2.60 | deployment and quota reads | `winget install Microsoft.AzureCLI` |
-| Bicep ≥ 0.30 | IaC | `az bicep install` |
-| `uv` | **all** Python env and dependency management | `winget install astral-sh.uv` |
-| Foundry Local | Option 4 runtime | `winget install Microsoft.FoundryLocal` |
-| Dev Tunnels CLI | publishes Option 4 to the gateway | `winget install Microsoft.DevTunnel` |
+| Tool              | Why                                                | Install                                   |
+| ----------------- | -------------------------------------------------- | ----------------------------------------- |
+| Azure CLI ≥ 2.60 | deployment and quota reads                         | `winget install Microsoft.AzureCLI`     |
+| Bicep ≥ 0.30     | IaC                                                | `az bicep install`                      |
+| `uv`            | **all** Python env and dependency management | `winget install astral-sh.uv`           |
+| Foundry Local     | Option 4 runtime                                   | `winget install Microsoft.FoundryLocal` |
+| Dev Tunnels CLI   | publishes Option 4 to the gateway                  | `winget install Microsoft.DevTunnel`    |
 
 Azure permissions: **Contributor** plus **User Access Administrator** on the target subscription (the deployment
 creates role assignments), and permission to create Foundry deployments.
@@ -257,10 +257,10 @@ Each section has the same shape so the four are directly comparable.
 
 **Azure resources**
 
-| Resource | Type |
-|---|---|
-| Foundry account | `Microsoft.CognitiveServices/accounts@2025-06-01` kind `AIServices` |
-| Managed compute deployment | `Microsoft.CognitiveServices/accounts/managedComputeDeployments` |
+| Resource                   | Type                                                                    |
+| -------------------------- | ----------------------------------------------------------------------- |
+| Foundry account            | `Microsoft.CognitiveServices/accounts@2025-06-01` kind `AIServices` |
+| Managed compute deployment | `Microsoft.CognitiveServices/accounts/managedComputeDeployments`      |
 
 > **There is no ARM/Bicep type for managed compute deployments yet.** They are created with the preview
 > management SDK (`azure-mgmt-cognitiveservices==15.0.0b2`), which is why Option 1 is a Python script rather
@@ -320,12 +320,12 @@ $ uv run python 01-managed-compute/list_templates.py
 
 **Deploy / verify / delete**
 
-| Step | Command | Notes |
-|---|---|---|
-| Check quota and fleet capacity | `uv run python 01-managed-compute/list_templates.py` | Read-only, free |
-| Create the deployment | `uv run python 01-managed-compute/deploy_managed_compute.py` | 10–25 min, **starts billing** |
-| Verify through the gateway | `uv run python shared/client.py --option 1` | |
-| Delete the deployment | `uv run python 01-managed-compute/deploy_managed_compute.py --delete` | **Stops billing** |
+| Step                           | Command                                                                 | Notes                               |
+| ------------------------------ | ----------------------------------------------------------------------- | ----------------------------------- |
+| Check quota and fleet capacity | `uv run python 01-managed-compute/list_templates.py`                  | Read-only, free                     |
+| Create the deployment          | `uv run python 01-managed-compute/deploy_managed_compute.py`          | 10–25 min,**starts billing** |
+| Verify through the gateway     | `uv run python shared/client.py --option 1`                           |                                     |
+| Delete the deployment          | `uv run python 01-managed-compute/deploy_managed_compute.py --delete` | **Stops billing**             |
 
 A deployment **cannot be deleted while it is still `Creating`** — the API returns
 `RequestConflict: Another operation is in progress`. Wait for it to reach a terminal state, then delete.
@@ -346,8 +346,8 @@ but is not. Use `--max-tokens 1024` or more for these two.
 
 **Azure resources**
 
-| Resource | Type |
-|---|---|
+| Resource         | Type                                                                                                                                   |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Model deployment | `Microsoft.CognitiveServices/accounts/deployments` with `properties.model.format = 'Fireworks'`, `sku.name = 'DataZoneStandard'` |
 
 This is **not** a Marketplace SaaS offer — no `az term accept`, no separate billing relationship. It is an
@@ -398,10 +398,10 @@ scale.
 ([`infra/modules/vm-inference.bicep`](infra/modules/vm-inference.bicep)). `vmSize` and `runtime` are parameters,
 so the same module serves a CPU box today and a GPU box after a quota increase:
 
-| `runtime` | Good for | Notes |
-|---|---|---|
-| `ollama` | CPU, or any GPU | Default. Simple, OpenAI-compatible, single binary |
-| `vllm` | GPU only | Continuous batching, much better multi-user throughput |
+| `runtime` | Good for        | Notes                                                  |
+| ----------- | --------------- | ------------------------------------------------------ |
+| `ollama`  | CPU, or any GPU | Default. Simple, OpenAI-compatible, single binary      |
+| `vllm`    | GPU only        | Continuous batching, much better multi-user throughput |
 
 The default is **`Standard_D4s_v7` + Ollama + `qwen2.5:1.5b-instruct`**, which needs **no GPU quota at all** and
 costs about **$0.19/hour**. If you do request GPU quota, ask for **`NCASv3_T4`** (T4, ~$0.53/hr) rather than
@@ -476,14 +476,14 @@ backend.
 Options 1–3 have backends in Azure, so the gateway calls them directly. Option 4 does not: Foundry Local listens
 on `http://127.0.0.1:39839` on your machine, which Azure cannot route to. There are two real answers.
 
-| | **A. APIM self-hosted gateway** | **B. Dev Tunnel — used here** |
-|---|---|---|
-| What it is | APIM's *data plane* as a Docker container you run locally; it syncs policy from Azure and executes it on your machine | A CLI that opens an outbound connection to a Microsoft relay and publishes a stable HTTPS URL |
-| Runs on the laptop | Docker container, ~1 GB RAM | Small CLI, negligible |
-| APIM SKU required | **Developer or Premium only** | Any |
-| Inference traffic | **never leaves the machine** | laptop → relay → Azure → relay → laptop |
-| Rate-limit counters | local, do not aggregate with the cloud gateway | single cloud gateway, counters aggregate |
-| Use it when | data residency, sovereignty, or air-gap requirements | proving a local model works as a gateway-fronted backend |
+|                     | **A. APIM self-hosted gateway**                                                                                  | **B. Dev Tunnel — used here**                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| What it is          | APIM's*data plane* as a Docker container you run locally; it syncs policy from Azure and executes it on your machine | A CLI that opens an outbound connection to a Microsoft relay and publishes a stable HTTPS URL |
+| Runs on the laptop  | Docker container, ~1 GB RAM                                                                                            | Small CLI, negligible                                                                         |
+| APIM SKU required   | **Developer or Premium only**                                                                                    | Any                                                                                           |
+| Inference traffic   | **never leaves the machine**                                                                                     | laptop → relay → Azure → relay → laptop                                                   |
+| Rate-limit counters | local, do not aggregate with the cloud gateway                                                                         | single cloud gateway, counters aggregate                                                      |
+| Use it when         | data residency, sovereignty, or air-gap requirements                                                                   | proving a local model works as a gateway-fronted backend                                      |
 
 APIM is split into a **control plane** (APIs, policies, keys, metrics — always in Azure) and a **data plane**
 (the process that receives a request, executes the policy XML, and calls the backend). Option A moves the data
@@ -576,10 +576,10 @@ the pair can never drift, and an entire class of silent `401` disappears.
 
 Two very different callers present the same kind of token to the same policy:
 
-| Caller | Identity | Application ID in the `appid` claim |
-|---|---|---|
-| `client.py`, `benchmark.py`, run by a developer | the human, via `az login` | Azure CLI's first-party app, `04b07795-...` |
-| A Foundry agent calling through a BYOM connection | the Foundry project's system-assigned managed identity | discovered by `setup_entra.py` |
+| Caller                                              | Identity                                               | Application ID in the`appid` claim         |
+| --------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------- |
+| `client.py`, `benchmark.py`, run by a developer | the human, via`az login`                             | Azure CLI's first-party app,`04b07795-...` |
+| A Foundry agent calling through a BYOM connection   | the Foundry project's system-assigned managed identity | discovered by`setup_entra.py`              |
 
 [`infra/scripts/setup_entra.py`](infra/scripts/setup_entra.py) resolves both and writes them into a single APIM
 named value, so changing who may call the gateway is a named-value update rather than a policy redeployment.
@@ -763,8 +763,7 @@ deployments, so the four routes stay identical.
 
 **Two more rules Foundry enforces on the model name**
 
-* **No colons.** `Deployment name contains invalid characters. Only alphanumeric, dots, hyphens, and underscores
-  allowed.` Ollama's `name:tag` convention always has one, so `cloud-init.yaml` publishes a colon-free alias
+* **No colons.** `Deployment name contains invalid characters. Only alphanumeric, dots, hyphens, and underscores allowed.` Ollama's `name:tag` convention always has one, so `cloud-init.yaml` publishes a colon-free alias
   (`ollama cp qwen2.5:1.5b-instruct qwen2.5-1.5b-instruct`).
 * **The Responses API property is `agent_reference`, not `agent`.** Using `agent` returns
   `invalid_payload: The 'agent' property is deprecated.`
@@ -784,17 +783,145 @@ deployments, so the four routes stay identical.
 
 ## 8. Demo script
 
-| Step | Command | Talking point |
-|---|---|---|
-| 1 | `uv run python shared/client.py --option 2` | Baseline. Serverless partner model, per-token billing, zero infrastructure. |
-| 2 | `uv run python shared/client.py --option 3` | Same client, same payload — now a VM you own. **Nothing in the client changed.** |
-| 3 | Show `03-azure-gpu-vm/cloud-init.yaml` | This is the part you now own: runtime, model, patching, scaling. |
-| 4 | `uv run python shared/client.py --option 4` | Same client again — **this one is running on this laptop's NPU**, tunnelled to a gateway in Azure. |
-| 5 | Stop the tunnel, rerun | That route fails while the other three keep serving. Ownership has consequences. |
-| 6 | `uv run python shared/client.py --option 1` | Dedicated GPUs, lowest and flattest latency — and a meter running at $7.91/hour. |
-| 7 | `uv run python shared/benchmark.py` | The trade-off in numbers: latency vs fixed cost vs per-token cost. |
-| 8 | App Insights → custom metrics, split by `ApiId` | One chart, four hosting patterns, because policy was written once. |
-| 9 | `uv run python shared/agent.py --all` | The same *agent* across all four. The hosting choice never reached the app. |
+The strongest 45-minute story is **not** to deploy resources live. APIM can take 30–45 minutes to provision and
+Managed Compute usually takes another 10–25 minutes. Pre-stage every backend, then use the meeting to show the
+architecture, the deployed resources, the four APIM APIs, and four successful calls.
+
+### Before the audience joins
+
+Run this at least 45 minutes before the meeting:
+
+```powershell
+uv run python infra/scripts/preflight.py
+uv run python 01-managed-compute/deploy_managed_compute.py --status
+uv run python 04-foundry-local/bootstrap.py --status
+```
+
+If the Option 3 VM was deallocated after the previous session, start it and allow several minutes for Ollama:
+
+```powershell
+az vm start -g rg-self-hosting-spectrum -n vm-inference-shs01
+```
+
+Start Option 4 in two terminals. The first command prepares and smoke-tests the model; the second command must
+remain running for the whole demonstration:
+
+```powershell
+# Terminal 1
+uv run python 04-foundry-local/bootstrap.py
+
+# Terminal 2 - leave this process running
+uv run python 04-foundry-local/tunnel.py
+```
+
+Finally, prove every route before screen sharing:
+
+```powershell
+uv run python shared/client.py --all --prompt "In one sentence, explain where this model is running."
+```
+
+Do not continue until this reports `4/4` successful calls. Keep a terminal with the commands below already
+typed, and close unrelated portal tabs and notifications.
+
+### The 45-minute walkthrough
+
+| Time | Show | What to say |
+| ---- | ---- | ----------- |
+| 0–7 min | The architecture Mermaid diagram in [§2](#2-architecture) | “One client sends one OpenAI-compatible payload through one keyless APIM gateway. Only the runtime owner and location change.” |
+| 7–12 min | The four rows in [§1](#1-the-four-options) | Option 1 is dedicated Foundry-managed capacity; Option 2 is partner serverless; Option 3 is a VM and runtime we operate; Option 4 is this laptop. |
+| 12–18 min | Azure resource group `rg-self-hosting-spectrum` | Point out Foundry, APIM, the VM, networking, and observability. Foundry Local is intentionally absent because it runs on the laptop. |
+| 18–23 min | APIM → APIs | Show the four `/v1/...` APIs and the common `POST /chat/completions` operation. Open one inbound policy and point out Entra validation, rate limiting, routing, and token metrics. |
+| 23–35 min | Four client calls, Options 1 through 4 | For each result, point to `runtime owner`, `runs on`, `route`, `model`, latency, token counts, and answer. The client code and prompt never change. |
+| 35–40 min | One `--all` call | This is the portability proof: four backends answer in one comparison table through the same gateway and credential. |
+| 40–45 min | Summary, questions, and cleanup | “The four options differ in who owns the runtime, not in how the application calls it.” Delete Managed Compute immediately after the final question. |
+
+### Show the Azure deployments
+
+Use the portal for visual clarity: open **Resource groups → `rg-self-hosting-spectrum` → Resources**. Keep this
+CLI fallback ready if the portal is slow:
+
+```powershell
+az resource list -g rg-self-hosting-spectrum `
+  --query "[].{Name:name, Type:type, Location:location}" -o table
+```
+
+Then show the resources unique to each pattern:
+
+1. **Option 1:** Foundry account → Models + endpoints → Managed Compute deployment.
+2. **Option 2:** Foundry account → Models + endpoints → Fireworks deployment.
+3. **Option 3:** `vm-inference-shs01`, its public IP, and the NSG restricted to APIM outbound addresses.
+4. **Option 4:** the `bootstrap.py` smoke-test output and the live Dev Tunnel terminal. It should not appear as
+   an Azure compute resource.
+
+### Show the four APIM APIs
+
+Open **API Management → APIs** and select each API. The URL suffixes must be:
+
+```text
+v1/managed-compute
+v1/fireworks
+v1/azure-vm
+v1/foundry-local
+```
+
+CLI fallback:
+
+```powershell
+az apim api list -g rg-self-hosting-spectrum -n apim-spectrum-shs01 `
+  --query "[].{Name:displayName, Path:path, SubscriptionRequired:subscriptionRequired}" -o table
+```
+
+Make three points before calling a model:
+
+* Every API exposes the same `POST /chat/completions` contract.
+* APIM validates a short-lived Entra token; the repository does not distribute backend keys to clients.
+* The shared fragment applies the same rate limit and telemetry policy to all four routes.
+
+### Call each pattern with the same prompt
+
+Use one short prompt so the audience compares hosting rather than answer quality:
+
+```powershell
+$prompt = "In one sentence, explain where this model is running."
+
+uv run python shared/client.py --option 1 --prompt $prompt
+uv run python shared/client.py --option 2 --prompt $prompt
+uv run python shared/client.py --option 3 --prompt $prompt
+uv run python shared/client.py --option 4 --prompt $prompt
+```
+
+After the four individual calls, finish with:
+
+```powershell
+uv run python shared/client.py --all --prompt $prompt
+```
+
+The client output deliberately prints the option, runtime owner, physical location, APIM route, model, latency,
+tokens, and answer. That is enough evidence for the demo; do not spend meeting time redeploying infrastructure,
+stopping a working tunnel, running benchmarks, or switching to the agent example unless someone specifically
+asks.
+
+### Demo recovery
+
+If one route fails, add `--verbose`, keep the other routes moving, and use the result as an ownership lesson:
+
+```powershell
+uv run python shared/client.py --option 3 --prompt $prompt --verbose
+```
+
+| Failure | Fast recovery |
+| ------- | ------------- |
+| All routes return 401/403 | Run `az login --tenant b1cd5b73-a77b-4002-a5a6-1599e4c4ee37`, then `uv run python infra/scripts/setup_entra.py`. |
+| Option 1 fails | Show `deploy_managed_compute.py --status`; do not create a replacement during the meeting. |
+| Option 3 fails | Confirm the VM is running; continue with Options 2 and 4 while Ollama warms up. |
+| Option 4 fails | Return to the tunnel terminal. Restart `tunnel.py` only if it exited; it rewires the APIM named value automatically. |
+
+Immediately after the demonstration, stop the two resources that bill while idle:
+
+```powershell
+uv run python 01-managed-compute/deploy_managed_compute.py --delete
+az vm deallocate -g rg-self-hosting-spectrum -n vm-inference-shs01
+```
 
 Closing line: **the four options differ in who owns the runtime, not in how you call it.**
 
@@ -802,14 +929,14 @@ Closing line: **the four options differ in who owns the runtime, not in how you 
 
 ## 9. Cost and teardown
 
-| Resource | Rate | Billed when idle? |
-|---|---|---|
-| **Managed compute H100_80GB** | **~$7.91/hr (~$190/day)** | **YES — this is the one that hurts** |
-| Managed compute A100_80GB | ~$3.67/hr (~$88/day) | **YES** |
-| APIM Developer | ~$48/month | yes (no SLA; Basic v2 ~$150/mo is the fallback with an SLA) |
-| VM `Standard_D4s_v7` | ~$0.19/hr | yes, unless deallocated |
-| Fireworks (per token) | $0.06 / $0.22 per 1M in/out | **no** |
-| Foundry Local | $0 | no |
+| Resource                            | Rate                            | Billed when idle?                                           |
+| ----------------------------------- | ------------------------------- | ----------------------------------------------------------- |
+| **Managed compute H100_80GB** | **~$7.91/hr (~$190/day)** | **YES — this is the one that hurts**                 |
+| Managed compute A100_80GB           | ~$3.67/hr (~$88/day)           | **YES**                                               |
+| APIM Developer                      | ~$48/month                      | yes (no SLA; Basic v2 ~$150/mo is the fallback with an SLA) |
+| VM`Standard_D4s_v7`               | ~$0.19/hr                       | yes, unless deallocated                                     |
+| Fireworks (per token)               | $0.06 / $0.22 per 1M in/out     | **no**                                                |
+| Foundry Local                       | $0                              | no                                                          |
 
 Stop the expensive thing first, right after the demo:
 
@@ -838,39 +965,40 @@ account** — without that the name stays reserved for 48 hours and the next dep
 
 ## 10. Troubleshooting
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| `401` from every route, keyless mode | No Entra token was sent, or it is for the wrong audience. | `az login --tenant <id>`, then confirm `ENTRA_AUDIENCE` in `.env` matches `spectrum-entra-audience` in APIM. Both the bare and trailing-slash spellings are accepted, so a mismatch here is a genuinely different audience. |
-| `403 "not on the gateway allow-list"` | The caller's application ID is not in `spectrum-entra-client-ids`. | `uv run python infra/scripts/setup_entra.py`. Use `--show` to see the current list, `--add-client-id` to extend it. |
-| Agents `403` but `client.py` works | The Foundry project's managed identity is missing from the allow-list, or you used its **object** ID instead of its **application** ID. | Re-run `setup_entra.py`; it resolves object → application ID for you. |
-| `setup_entra.py` says the project has no managed identity | The project predates the identity block in `infra/modules/foundry.bicep`. | Re-run `deploy.py`, or add one in the portal under Foundry → your project → Identity. |
-| `401` from every route, key mode | `APIM_SUBSCRIPTION_KEY` holds the APIM **master** key. `deploy.py` writes it; `deploy_apis.py` replaces it with the `spectrum-demo` product key. | Re-run `deploy_apis.py`. Order matters. |
-| Option 3 returns `HTTP 500` after ~25s | NSG uses the `ApiManagement` service tag, which does not cover gateway→backend traffic. | Allow APIM's `outboundIpAddresses` explicitly (§5, Option 3). |
-| Option 3 returns `500` immediately, VM looks healthy | `ollama pull` ran under cloud-init with no `$HOME` and panicked. The daemon is up and listening but serving **no model**. | `export HOME=/root` before `ollama pull`. Already fixed in `cloud-init.yaml`. |
-| Option 4 returns `400 "Model … is not loaded"` | The model is cached but not resident. | `foundry model load <variant>`; `bootstrap.py` does this. |
-| Option 4 returns HTML | Dev Tunnels anti-phishing interstitial. | `X-Tunnel-Skip-AntiPhishing-Page: true`, set in the route policy. |
-| `UnicodeDecodeError` running `bootstrap.py` | The `foundry` CLI draws box-art tables; Windows subprocesses default to cp1252. | Capture subprocess output as UTF-8 with `errors="replace"`. |
-| Policy deploy fails with `'key' start tag … does not match` | A literal `<` in policy text content. | Escape it (§6). |
-| Managed compute: `DeploymentTemplate must be provided` | An accelerator was pinned without a template. | Supply `--template`, or drop the accelerator (§5, Option 1). |
-| Managed compute: `no default deployment template` | That model has no `AllowedDeploymentTemplates` — most `azureml`-registry models are serverless-only. | Use an `azure-huggingface` model that has one. |
-| Managed compute: `RequestConflict: Another operation is in progress` | You tried to delete a deployment that is still `Creating`. | Wait for a terminal state, then delete. |
-| Fireworks deploy fails | `Fireworks.EnableDeploy` not registered, or a PTU-only model. | `preflight.py` registers the flag (~30 min); use `list_models.py` to pick a pay-as-you-go model. |
-| Fireworks answer is truncated mid-reasoning | It is a reasoning model that emits its chain of thought. | Raise `--max-tokens` (client default is 512). |
-| Fireworks returns `429 RateLimitReached` on back-to-back calls | Deployment `sku.capacity` of 1 means 1 request/min. It is a Fireworks-side throttle, not APIM. | Raise `capacity` (billing is per-token, so this is free), or use `benchmark.py --pause`. |
-| Agent fails with `Model gateway error: Upstream gateway returned NotFound` | Foundry probes `GET <target>/deployments/<model>` before forwarding, and the route has no such operation. | Publish the probe operation (§7). Confirm in App Insights, not from the error text. |
-| Agent fails with `Failed to parse deployment response … from provider 'AzureOpenAI'` | The probe answered, but with the flat data-plane shape instead of the ARM envelope. | Return `name` / `properties.model` / `sku` too (§7). |
-| Agent fails with `Deployment name contains invalid characters` | The model name contains a colon — Ollama's `name:tag`. | Publish a colon-free alias with `ollama cp` (§7). |
-| Agent fails `403 … agents/write` | Subscription Contributor does not grant Foundry data-plane writes. | Assign **Foundry User** by GUID `53ca6127-…` (§7); the name "Azure AI User" no longer resolves. |
-| Agent fails `invalid_payload: The 'agent' property is deprecated` | Responses API renamed it. | Use `agent_reference`. |
-| Agent worked, then started failing 401 after a redeploy | `deploy_apis.py` rotates `APIM_SUBSCRIPTION_KEY`, invalidating the key stored inside the Foundry connections. **Does not happen in the keyless default**, where connections store no key at all. | **Always re-run `register_connections.py` after `deploy_apis.py`** in key mode. |
-| `az` commands hit the wrong tenant | A different default subscription. | `az account set --subscription <id>` before anything else. |
-| `uv` cannot reach PyPI | Corporate TLS interception on `files.pythonhosted.org`. | Point `uv` at an internal index with a `uv.toml`. `uv` does **not** read `pip.ini`. |
+| Symptom                                                                                | Cause                                                                                                                                                                                                      | Fix                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `401` from every route, keyless mode                                                 | No Entra token was sent, or it is for the wrong audience.                                                                                                                                                  | `az login --tenant <id>`, then confirm `ENTRA_AUDIENCE` in `.env` matches `spectrum-entra-audience` in APIM. Both the bare and trailing-slash spellings are accepted, so a mismatch here is a genuinely different audience. |
+| `403 "not on the gateway allow-list"`                                                | The caller's application ID is not in`spectrum-entra-client-ids`.                                                                                                                                        | `uv run python infra/scripts/setup_entra.py`. Use `--show` to see the current list, `--add-client-id` to extend it.                                                                                                           |
+| Agents`403` but `client.py` works                                                  | The Foundry project's managed identity is missing from the allow-list, or you used its**object** ID instead of its **application** ID.                                                         | Re-run`setup_entra.py`; it resolves object → application ID for you.                                                                                                                                                             |
+| `setup_entra.py` says the project has no managed identity                            | The project predates the identity block in`infra/modules/foundry.bicep`.                                                                                                                                 | Re-run`deploy.py`, or add one in the portal under Foundry → your project → Identity.                                                                                                                                            |
+| `401` from every route, key mode                                                     | `APIM_SUBSCRIPTION_KEY` is missing or stale. It is generated only when `GATEWAY_AUTH_MODE=key` or `both`; Entra-only mode creates no gateway subscription key.                                      | Re-run `deploy_apis.py` after selecting `key` or `both`.                                                                                                                                                                           |
+| Option 3 returns`HTTP 500` after ~25s                                                | NSG uses the`ApiManagement` service tag, which does not cover gateway→backend traffic.                                                                                                                  | Allow APIM's`outboundIpAddresses` explicitly (§5, Option 3).                                                                                                                                                                     |
+| Option 3 returns`500` immediately, VM looks healthy                                  | `ollama pull` ran under cloud-init with no `$HOME` and panicked. The daemon is up and listening but serving **no model**.                                                                        | `export HOME=/root` before `ollama pull`. Already fixed in `cloud-init.yaml`.                                                                                                                                                 |
+| Option 4 returns`400 "Model … is not loaded"`                                       | The model is cached but not resident.                                                                                                                                                                      | `foundry model load <variant>`; `bootstrap.py` does this.                                                                                                                                                                       |
+| Option 4 returns HTML                                                                  | Dev Tunnels anti-phishing interstitial.                                                                                                                                                                    | `X-Tunnel-Skip-AntiPhishing-Page: true`, set in the route policy.                                                                                                                                                                 |
+| `UnicodeDecodeError` running `bootstrap.py`                                        | The`foundry` CLI draws box-art tables; Windows subprocesses default to cp1252.                                                                                                                           | Capture subprocess output as UTF-8 with`errors="replace"`.                                                                                                                                                                        |
+| Policy deploy fails with`'key' start tag … does not match`                          | A literal`<` in policy text content.                                                                                                                                                                     | Escape it (§6).                                                                                                                                                                                                                    |
+| Managed compute:`DeploymentTemplate must be provided`                                | An accelerator was pinned without a template.                                                                                                                                                              | Supply`--template`, or drop the accelerator (§5, Option 1).                                                                                                                                                                      |
+| Managed compute:`no default deployment template`                                     | That model has no`AllowedDeploymentTemplates` — most `azureml`-registry models are serverless-only.                                                                                                   | Use an`azure-huggingface` model that has one.                                                                                                                                                                                     |
+| Managed compute:`RequestConflict: Another operation is in progress`                  | You tried to delete a deployment that is still`Creating`.                                                                                                                                                | Wait for a terminal state, then delete.                                                                                                                                                                                             |
+| Fireworks deploy fails                                                                 | `Fireworks.EnableDeploy` not registered, or a PTU-only model.                                                                                                                                            | `preflight.py` registers the flag (~30 min); use `list_models.py` to pick a pay-as-you-go model.                                                                                                                                |
+| Fireworks answer is truncated mid-reasoning                                            | It is a reasoning model that emits its chain of thought.                                                                                                                                                   | Raise`--max-tokens` (client default is 512).                                                                                                                                                                                      |
+| Fireworks returns`429 RateLimitReached` on back-to-back calls                        | Deployment`sku.capacity` of 1 means 1 request/min. It is a Fireworks-side throttle, not APIM.                                                                                                            | Raise`capacity` (billing is per-token, so this is free), or use `benchmark.py --pause`.                                                                                                                                         |
+| Agent fails with`Model gateway error: Upstream gateway returned NotFound`            | Foundry probes`GET <target>/deployments/<model>` before forwarding, and the route has no such operation.                                                                                                 | Publish the probe operation (§7). Confirm in App Insights, not from the error text.                                                                                                                                                |
+| Agent fails with`Failed to parse deployment response … from provider 'AzureOpenAI'` | The probe answered, but with the flat data-plane shape instead of the ARM envelope.                                                                                                                        | Return`name` / `properties.model` / `sku` too (§7).                                                                                                                                                                          |
+| Agent fails with`Deployment name contains invalid characters`                        | The model name contains a colon — Ollama's`name:tag`.                                                                                                                                                   | Publish a colon-free alias with`ollama cp` (§7).                                                                                                                                                                                 |
+| Agent fails`403 … agents/write`                                                     | Subscription Contributor does not grant Foundry data-plane writes.                                                                                                                                         | Assign**Foundry User** by GUID `53ca6127-…` (§7); the name "Azure AI User" no longer resolves.                                                                                                                            |
+| Agent fails`invalid_payload: The 'agent' property is deprecated`                     | Responses API renamed it.                                                                                                                                                                                  | Use`agent_reference`.                                                                                                                                                                                                             |
+| Agent worked, then started failing 401 after a redeploy                                | `deploy_apis.py` rotates `APIM_SUBSCRIPTION_KEY`, invalidating the key stored inside the Foundry connections. **Does not happen in the keyless default**, where connections store no key at all. | **Always re-run `register_connections.py` after `deploy_apis.py`** in key mode.                                                                                                                                           |
+| `az` commands hit the wrong tenant                                                   | A different default subscription.                                                                                                                                                                          | `az account set --subscription <id>` before anything else.                                                                                                                                                                        |
+| `uv` cannot reach PyPI                                                               | Corporate TLS interception on`files.pythonhosted.org`.                                                                                                                                                   | Point`uv` at an internal index with a `uv.toml`. `uv` does **not** read `pip.ini`.                                                                                                                                    |
 
 ---
 
 ## 11. References
 
 **API Management as an AI gateway**
+
 - [AI gateway capabilities in API Management](https://learn.microsoft.com/azure/api-management/genai-gateway-capabilities)
 - [Import an OpenAI-compatible LLM API](https://learn.microsoft.com/azure/api-management/openai-compatible-llm-api)
 - [`llm-token-limit`](https://learn.microsoft.com/azure/api-management/llm-token-limit-policy) ·
@@ -882,22 +1010,27 @@ account** — without that the name stays reserved for 48 hours and the next dep
 - [Self-hosted gateway overview](https://learn.microsoft.com/azure/api-management/self-hosted-gateway-overview)
 
 **Entra ID and managed identity**
+
 - [Managed identities for Azure resources](https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/overview)
 - [Access tokens and the `appid` claim](https://learn.microsoft.com/entra/identity-platform/access-token-claims-reference)
 - [`DefaultAzureCredential`](https://learn.microsoft.com/python/api/overview/azure/identity-readme)
 
 **Foundry**
+
 - [Foundry Managed Compute overview](https://learn.microsoft.com/azure/ai-foundry/concepts/managed-compute-overview)
 - [Deploy models to managed compute](https://learn.microsoft.com/azure/ai-foundry/how-to/deploy-models-managed)
 - [Bring Your Own Model to Foundry Agent Service](https://learn.microsoft.com/azure/ai-foundry/agents/how-to/bring-your-own-model)
 - [Models sold directly by Azure](https://learn.microsoft.com/azure/ai-foundry/concepts/models-sold-directly-by-azure)
 
 **Foundry Local**
+
 - [Foundry Local overview](https://learn.microsoft.com/azure/ai-foundry/foundry-local/what-is-foundry-local)
 - [Foundry Local CLI reference](https://learn.microsoft.com/azure/ai-foundry/foundry-local/reference/reference-cli)
 
 **Dev Tunnels**
+
 - [Dev tunnels overview](https://learn.microsoft.com/azure/developer/dev-tunnels/overview)
 
 **Serving runtimes**
+
 - [vLLM](https://docs.vllm.ai/) · [Ollama OpenAI compatibility](https://github.com/ollama/ollama/blob/main/docs/openai.md)

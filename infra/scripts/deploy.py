@@ -106,7 +106,9 @@ def update_env_file(values: dict[str, str]) -> None:
     ENV_PATH.write_text(text, encoding="utf-8")
     print(f"\n[ok] Wrote {len(values)} value(s) into {ENV_PATH.name}:")
     for key, value in values.items():
-        shown = value if len(value) < 60 else value[:57] + "..."
+        shown = "<redacted>" if key == "APIM_SUBSCRIPTION_KEY" else (
+            value if len(value) < 60 else value[:57] + "..."
+        )
         print(f"       {key}={shown}")
 
 
@@ -193,7 +195,7 @@ def main() -> int:
             env_updates[env_key] = str(value)
 
     apim_name = (outputs.get("apimName") or {}).get("value")
-    if apim_name:
+    if apim_name and settings.gateway_auth_mode.strip().lower() in {"key", "both"}:
         key = fetch_apim_subscription_key(settings.resource_group, apim_name)
         if key:
             env_updates["APIM_SUBSCRIPTION_KEY"] = key

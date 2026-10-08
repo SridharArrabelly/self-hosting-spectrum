@@ -165,14 +165,12 @@ def main() -> int:
     if args.what_if:
         return 0
 
-    key = fetch_gateway_key(settings.subscription_id, settings.resource_group, apim_name)
-    if key:
-        # Written even in Entra mode. Nothing uses it while GATEWAY_AUTH_MODE is
-        # entra, but having it on hand turns "is the gateway broken or is my
-        # token wrong?" into a one-line experiment.
-        update_env_file({"APIM_SUBSCRIPTION_KEY": key})
-    else:
-        print("[warn] Could not read the spectrum-demo subscription key.")
+    if settings.gateway_auth_mode.strip().lower() in {"key", "both"}:
+        key = fetch_gateway_key(settings.subscription_id, settings.resource_group, apim_name)
+        if key:
+            update_env_file({"APIM_SUBSCRIPTION_KEY": key})
+        else:
+            print("[warn] Could not read the spectrum-demo subscription key.")
 
     gateway = settings.apim_gateway_url or f"https://{apim_name}.azure-api.net"
     print("\nRoutes now live:")

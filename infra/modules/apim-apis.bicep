@@ -60,6 +60,7 @@ param foundryLocalBackendUrl string = ''
 // A backend that is not wired up yet still needs a syntactically valid URL, or
 // the API will not create. This one fails fast and obviously if it is ever hit.
 var notWiredYet = 'https://not-configured.invalid/v1'
+var keyAuthEnabled = gatewayAuthMode != 'entra'
 
 // Normalise the audience so the two spellings below are always a matched pair,
 // whichever way the parameter happened to be written. The max() guard is only
@@ -75,7 +76,7 @@ resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
 // --- Named values ----------------------------------------------------------
 // Everything the policies need that might change without a code change.
 
-resource productSpectrum 'Microsoft.ApiManagement/service/products@2024-05-01' = {
+resource productSpectrum 'Microsoft.ApiManagement/service/products@2024-05-01' = if (keyAuthEnabled) {
   parent: apim
   name: 'spectrum'
   properties: {
@@ -90,7 +91,7 @@ resource productSpectrum 'Microsoft.ApiManagement/service/products@2024-05-01' =
 // The gateway key. Created as a real APIM subscription so APIM owns the secret
 // and it never appears in a parameter file or a deployment output. The policy
 // fragment compares against it by named value reference.
-resource gatewaySubscription 'Microsoft.ApiManagement/service/subscriptions@2024-05-01' = {
+resource gatewaySubscription 'Microsoft.ApiManagement/service/subscriptions@2024-05-01' = if (keyAuthEnabled) {
   parent: apim
   name: 'spectrum-demo'
   properties: {
@@ -106,7 +107,7 @@ resource nvGatewayKey 'Microsoft.ApiManagement/service/namedValues@2024-05-01' =
   name: 'spectrum-gateway-key'
   properties: {
     displayName: 'spectrum-gateway-key'
-    value: gatewaySubscription.listSecrets().primaryKey
+    value: keyAuthEnabled ? gatewaySubscription!.listSecrets().primaryKey : 'disabled-in-entra-mode'
     secret: true
   }
 }

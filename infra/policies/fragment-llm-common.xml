@@ -40,9 +40,7 @@
         header-name="Authorization"
         output-token-variable-name="jwt"
         failed-validation-httpcode="401"
-        failed-validation-error-message="Unauthorized. Send an Entra bearer token for audience {{spectrum-entra-audience}}."
-        require-expiration-time="true"
-        require-signed-tokens="true">
+        failed-validation-error-message="Unauthorized. Send an Entra bearer token for audience {{spectrum-entra-audience}}.">
         <audiences>
           <audience>{{spectrum-entra-audience}}</audience>
           <audience>{{spectrum-entra-audience-alt}}</audience>
