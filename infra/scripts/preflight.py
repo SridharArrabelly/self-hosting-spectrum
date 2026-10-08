@@ -30,6 +30,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from azure.core.exceptions import HttpResponseError  # noqa: E402
+from azure.identity import AzureCliCredential  # noqa: E402
+from azure.mgmt.cognitiveservices import CognitiveServicesManagementClient  # noqa: E402
+
 from shared.config import load_settings  # noqa: E402
 
 REQUIRED_PROVIDERS = [
@@ -207,34 +211,43 @@ def check_fireworks(rep: Report, fix: bool) -> None:
         rep.fail(f"{FIREWORKS_FEATURE} {state} - Option 2 will fail. Rerun with --fix")
 
 
-def check_managed_compute_quota(rep: Report, location: str) -> None:
+def check_managed_compute_quota(
+    rep: Report,
+    subscription_id: str,
+    location: str,
+) -> None:
     header(f"Managed Compute accelerator quota ({location})")
     rep.info("This is a separate namespace from VM/AML GPU quota - zero VM GPU cores")
     rep.info("does not block Option 1.")
 
-    usages = az("cognitiveservices", "usage", "list", "-l", location, check=False)
+    try:
+        client = CognitiveServicesManagementClient(
+            AzureCliCredential(),
+            subscription_id,
+        )
+        usages = list(client.managed_compute_usages_operation_group.list(location))
+    except HttpResponseError as exc:
+        rep.warn(
+            "Could not read Managed Compute accelerator quota "
+            f"(HTTP {exc.status_code})."
+        )
+        rep.info("Check the Foundry portal quota page before deploying Option 1.")
+        return
+
     if not usages:
-        rep.warn("Could not read Cognitive Services usage for this region.")
-        rep.warn("Check the Foundry portal quota page before deploying Option 1.")
-        return
-
-    accel = [
-        u for u in usages
-        if any(tag in (u.get("name", {}).get("value") or "").upper()
-               for tag in ("A100", "H100", "MI300", "ACCELERATOR", "MANAGEDCOMPUTE"))
-    ]
-    if not accel:
         rep.warn("No accelerator quota entries returned for this region.")
-        rep.warn("Quota is granted per Foundry account - re-check after the account exists.")
+        rep.info("Check Management centre > Quota in the Foundry portal before Option 1.")
         return
 
-    for u in accel:
-        name = u.get("name", {}).get("value", "?")
-        used, limit = u.get("currentValue", 0), u.get("limit", 0)
+    for usage in usages:
+        data = usage.as_dict()
+        name = (data.get("name") or {}).get("value", "?").rsplit(".", 1)[-1]
+        used = int(data.get("currentValue") or 0)
+        limit = int(data.get("limit") or 0)
         if limit and limit > 0:
-            rep.ok(f"{name:<44} {used:g}/{limit:g}")
+            rep.ok(f"{name:<44} {used}/{limit}")
         else:
-            rep.warn(f"{name:<44} {used:g}/{limit:g} - request quota to use this accelerator")
+            rep.warn(f"{name:<44} {used}/{limit} - request quota to use this accelerator")
 
 
 def check_vm_quota(rep: Report, location: str, vm_size: str) -> None:
@@ -295,7 +308,7 @@ def main() -> int:
 
     check_providers(rep, args.fix)
     check_fireworks(rep, args.fix)
-    check_managed_compute_quota(rep, settings.location)
+    check_managed_compute_quota(rep, settings.subscription_id, settings.location)
     check_vm_quota(rep, settings.location, settings.raw.get("VM_SIZE", "Standard_D4s_v7"))
 
     header("Summary")
