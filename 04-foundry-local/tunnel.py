@@ -157,12 +157,28 @@ def wait_for_hosted_url(port: int, timeout: float = 30.0) -> str:
 def start_host() -> subprocess.Popen[str]:
     """Host the tunnel. This process must stay alive for the route to work."""
     print(f"[info] Hosting {TUNNEL_ID} - leave this running while you demo Option 4")
-    return subprocess.Popen(
-        [devtunnel_exe(), "host", TUNNEL_ID],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    return subprocess.Popen([devtunnel_exe(), "host", TUNNEL_ID])
+
+
+def verify_local(port: int) -> None:
+    """Fail with an actionable message when Foundry Local is not ready."""
+    try:
+        response = httpx.get(f"http://127.0.0.1:{port}/v1/models", timeout=10.0)
+        response.raise_for_status()
+        models = response.json().get("data", [])
+    except Exception as exc:
+        raise SystemExit(
+            f"Foundry Local is not ready on port {port}: {type(exc).__name__}: {exc}\n"
+            "Start and load the local model first:\n"
+            "  uv run python 04-foundry-local/bootstrap.py"
+        ) from exc
+    if not models:
+        raise SystemExit(
+            f"Foundry Local on port {port} has no models available.\n"
+            "Load the configured model first:\n"
+            "  uv run python 04-foundry-local/bootstrap.py"
+        )
+    print(f"[ok] Foundry Local ready on port {port}")
 
 
 def verify(url: str, timeout: float = 60.0) -> bool:
@@ -211,8 +227,10 @@ def push_to_apim(url: str) -> None:
         text=True,
     )
     if proc.returncode != 0:
-        print("[warn] Could not update the APIM named value. Run this manually:")
-        print(f"  uv run python infra/scripts/deploy_apis.py --set-backend foundry-local {url}/v1")
+        raise SystemExit(
+            "Could not update the APIM named value. Run this manually:\n"
+            f"  uv run python infra/scripts/deploy_apis.py --set-backend foundry-local {url}/v1"
+        )
 
 
 def main() -> int:
@@ -253,21 +271,29 @@ def main() -> int:
         print(f"\nHost it when you are ready:\n  devtunnel host {TUNNEL_ID}")
         return 0
 
+    verify_local(port)
     process = start_host()
     try:
         url = wait_for_hosted_url(port)
         print(f"[ok] Tunnel URL: {url}")
         update_env({"FOUNDRY_LOCAL_TUNNEL_URL": url, "FOUNDRY_LOCAL_BACKEND_URL": f"{url}/v1"})
         push_to_apim(url)
-        verify(url)
+        if not verify(url):
+            print(
+                "\n[error] Option 4 is not live because the tunnel health check failed.\n"
+                "Check the Dev Tunnel output above, then rerun this command."
+            )
+            return 1
         print("\nOption 4 is live. In another terminal:")
         print("  uv run python shared/client.py --option 4")
         print("\nCtrl+C here stops the tunnel and takes the route offline.")
-        process.wait()
+        return process.wait()
     except KeyboardInterrupt:
         print("\n[info] Stopping tunnel")
     finally:
-        process.terminate()
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=10)
     return 0
 
 
