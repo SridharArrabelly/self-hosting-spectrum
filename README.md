@@ -334,7 +334,7 @@ A deployment **cannot be deleted while it is still `Creating`** — the API retu
 traffic.** This is the only option in this repo that can cost real money if you forget about it.
 
 **Reasoning models return `content: null` if you starve them.** Both the Option 1 (Qwen3.6) and Option 2
-(Nemotron) models emit reasoning tokens before the answer. With a small `max_tokens` they hit the ceiling
+(Fireworks) models can emit reasoning tokens before the answer. With a small `max_tokens` they hit the ceiling
 mid-thought and return `finish_reason: "length"` with an empty `content` — which looks like a broken endpoint
 but is not. Use `--max-tokens 1024` or more for these two.
 
@@ -361,15 +361,15 @@ One gate: the subscription feature **`Fireworks.EnableDeploy`** must be register
 
 1. **`model` in the request body is the *deployment* name, not the catalogue ID.** This repo names the
    deployment `fireworks`, so the body says `"model": "fireworks"` even though the catalogue entry is
-   `FW-Nemotron-Lightning-3.5-30B-A3B`.
+   `FW-GLM-5.3-Flash`.
 2. **Almost every small Fireworks model is provisioned-throughput only.** `FW-Llama-v3.1-8B-Instruct` and the
    other small models cannot be deployed pay-as-you-go at any price a demo would tolerate — they start at
    40 PTU. Run `uv run python 02-fireworks-on-foundry/list_models.py` to see which models actually offer
    `DataZoneStandard` / `GlobalStandard`.
 
-The default here is **`FW-Nemotron-Lightning-3.5-30B-A3B`** at **$0.06 / $0.22 per 1M input/output tokens**.
-It is 30B total but only 3B active (Mamba-Transformer MoE), so it is both cheap and capable. It is also a
-**reasoning** model — it emits a visible chain of thought, so give it enough `max_tokens` (the client defaults
+The default here is **`FW-GLM-5.3-Flash`**, a currently GA pay-as-you-go chat model. Fireworks' serverless
+catalog changes frequently, so run `list_models.py` before deployment and verify current pricing in Foundry.
+It is a **reasoning** model — it may emit reasoning tokens, so give it enough `max_tokens` (the client defaults
 to 512) or the answer gets truncated mid-thought.
 
 > Per-token Fireworks models carry only a **15-day retirement notice**. The model name is a Bicep parameter for
@@ -918,7 +918,7 @@ In **API Management → APIs → 02 - Fireworks on Foundry**:
 Expect HTTP `200`, an OpenAI-compatible `choices` array, a `usage` object, and response headers including
 `x-shs-route: fireworks`. Do **not** add an APIM subscription key: this gateway is configured for Entra-only
 authentication. The request body's model is the deployment name `fireworks`; the catalog model behind it is
-`FW-Nemotron-Lightning-3.5-30B-A3B`.
+`FW-GLM-5.3-Flash`.
 
 The bearer token is sensitive but short-lived. Clear it from the clipboard after the test:
 
@@ -984,7 +984,7 @@ Closing line: **the four options differ in who owns the runtime, not in how you 
 | Managed compute A100_80GB           | ~$3.67/hr (~$88/day)           | **YES**                                               |
 | APIM Developer                      | ~$48/month                      | yes (no SLA; Basic v2 ~$150/mo is the fallback with an SLA) |
 | VM`Standard_D4s_v7`               | ~$0.19/hr                       | yes, unless deallocated                                     |
-| Fireworks (per token)               | $0.06 / $0.22 per 1M in/out     | **no**                                                |
+| Fireworks (per token)               | Check the current Foundry price | **no**                                                |
 | Foundry Local                       | $0                              | no                                                          |
 
 Stop the expensive thing first, right after the demo:

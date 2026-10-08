@@ -17,13 +17,10 @@ decide whether Option 1 is viable today:
   3. Whether a specific model asset can land on an accelerator you have.
 
 Deployment templates (the vLLM/SGLang/TRT-LLM recipe and its context length)
-are not enumerable through the management SDK. They do not have to be: the
-template is optional at creation, and the service picks the default for the
-model and accelerator. Pass --template only to pin a specific recipe, e.g. a
-256K-context variant.
-
-Cost note: A100_80GB is roughly half the hourly rate of H100_80GB and is
-plenty for a small model, so this script sorts A100 first.
+are not enumerable through the management SDK. The configured template decides
+which accelerator is legal. The repository's FP8 Qwen template requires
+H100_80GB, so a generic capacity result for cheaper A100 hardware must not be
+turned into a deployment recommendation.
 """
 
 from __future__ import annotations
@@ -53,6 +50,12 @@ CANDIDATE_MODELS = [
     "azureml://registries/azureml-meta/models/Llama-3.2-3B-Instruct/versions/1",
     "azureml://registries/azureml/models/Mistral-7B-Instruct-v0.2/versions/1",
 ]
+
+DEFAULT_DEPLOY_MODEL = (
+    "azureml://registries/azure-huggingface/models/"
+    "qwen--qwen3.6-27b-fp8/versions/7"
+)
+DEFAULT_DEPLOY_ACCELERATOR = "H100_80GB"
 
 
 def client(subscription_id: str) -> CognitiveServicesManagementClient:
@@ -135,7 +138,7 @@ def main() -> int:
     deployment_rows = existing(mgmt, settings.resource_group, account)
 
     models = CANDIDATE_MODELS if args.all_candidates else [
-        args.model or settings.raw.get("MC_MODEL_URI") or CANDIDATE_MODELS[0]
+        args.model or settings.raw.get("MC_MODEL_URI") or DEFAULT_DEPLOY_MODEL
     ]
     capacity_rows = {}
     for model in models:
@@ -193,12 +196,28 @@ def main() -> int:
         print("\n  These bill per accelerator-hour with zero traffic.")
         print("  Delete with: uv run python 01-managed-compute/deploy_managed_compute.py --delete")
 
-    best = next((r for r in quota_rows if r["limit"] - r["used"] > 0), None)
-    if best and not deployment_rows:
-        print(f"\nSuggested: deploy on {best['accelerator']} "
-              f"({best['limit'] - best['used']} accelerator(s) of quota free)")
-        print("  uv run python 01-managed-compute/deploy_managed_compute.py "
-              f"--accelerator {best['accelerator']}")
+    configured_accelerator = settings.raw.get("MC_ACCELERATOR") or DEFAULT_DEPLOY_ACCELERATOR
+    configured_quota = next(
+        (r for r in quota_rows if r["accelerator"] == configured_accelerator), None
+    )
+    configured_capacity = capacity_rows.get(models[0])
+    accelerator_capacity = (
+        next((r for r in configured_capacity if r["accelerator"] == configured_accelerator), None)
+        if isinstance(configured_capacity, list)
+        else None
+    )
+    if not deployment_rows:
+        free_quota = (
+            configured_quota["limit"] - configured_quota["used"] if configured_quota else 0
+        )
+        free_capacity = accelerator_capacity["available"] if accelerator_capacity else 0
+        print(f"\nConfigured deployment accelerator: {configured_accelerator}")
+        if free_quota > 0 and free_capacity > 0:
+            print(f"  ready: {free_quota} quota unit(s), {free_capacity} accelerator(s) in fleet")
+            print("  uv run python 01-managed-compute/deploy_managed_compute.py")
+        else:
+            print(f"  not ready: quota free={free_quota}, fleet capacity={free_capacity}")
+            print("  Do not override the accelerator unless the deployment template supports it.")
     return 0
 
 

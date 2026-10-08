@@ -62,7 +62,10 @@ param vmSshSourceAddressPrefix string = ''
 param deployFireworks bool = true
 
 @description('Fireworks catalog model id. Small models are PTU-only; this one is pay-as-you-go.')
-param fireworksModel string = 'FW-Nemotron-Lightning-3.5-30B-A3B'
+param fireworksModel string = 'FW-GLM-5.3-Flash'
+
+@description('Pay-as-you-go SKU supported by the selected Fireworks model.')
+param fireworksSku string = 'GlobalStandard'
 
 @description('Name of the Fireworks deployment. This is what clients send as "model".')
 param fireworksDeploymentName string = 'fireworks'
@@ -135,6 +138,7 @@ module fireworks 'modules/fireworks.bicep' = if (deployFireworks) {
     foundryAccountName: foundry.outputs.accountName
     deploymentName: fireworksDeploymentName
     modelName: fireworksModel
+    skuName: fireworksSku
   }
 }
 

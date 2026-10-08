@@ -23,7 +23,8 @@ param projectName = readEnvironmentVariable('FOUNDRY_PROJECT_NAME', 'proj-spectr
 param developerPrincipalId = readEnvironmentVariable('DEVELOPER_PRINCIPAL_ID', '')
 
 param deployFireworks = bool(readEnvironmentVariable('DEPLOY_FIREWORKS', 'true'))
-param fireworksModel = readEnvironmentVariable('FIREWORKS_MODEL', 'FW-Nemotron-Lightning-3.5-30B-A3B')
+param fireworksModel = readEnvironmentVariable('FIREWORKS_MODEL', 'FW-GLM-5.3-Flash')
+param fireworksSku = readEnvironmentVariable('FIREWORKS_SKU', 'GlobalStandard')
 param fireworksDeploymentName = readEnvironmentVariable('FIREWORKS_DEPLOYMENT_NAME', 'fireworks')
 
 param deployVm = bool(readEnvironmentVariable('DEPLOY_VM', 'true'))

@@ -120,10 +120,9 @@ def tunnel_url(port: int) -> str:
             if url:
                 return url.rstrip("/")
 
-    # Dev Tunnels URLs are deterministic, and the cluster is the suffix of the
-    # tunnel id: "shs-foundry-local.inc1" is hosted in cluster "inc1" and
-    # published at https://shs-foundry-local-39839.inc1.devtunnels.ms.
-    # `devtunnel show --json` does not return the URL itself, so derive it.
+    # Older CLI versions omitted portUri and used a deterministic hostname.
+    # Keep that fallback for setup-only mode, but a hosted tunnel's portUri is
+    # authoritative and may now contain an opaque generated hostname.
     raw_id = tunnel.get("tunnelId") or TUNNEL_ID
     cluster = tunnel.get("clusterId")
     name = raw_id
@@ -133,6 +132,26 @@ def tunnel_url(port: int) -> str:
     if cluster:
         return f"https://{name}-{port}.{cluster}.devtunnels.ms"
     raise SystemExit(f"Could not determine the tunnel URL from:\n{proc.stdout}")
+
+
+def wait_for_hosted_url(port: int, timeout: float = 30.0) -> str:
+    """Wait until the relay publishes its authoritative portUri."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        proc = devtunnel(["show", TUNNEL_ID, "--json"], check=False)
+        if proc.returncode == 0:
+            try:
+                data = json.loads(proc.stdout)
+                tunnel = data.get("tunnel", data)
+                for entry in tunnel.get("ports", []):
+                    if int(entry.get("portNumber", 0)) == port:
+                        url = entry.get("portUri") or (entry.get("portForwardingUris") or [None])[0]
+                        if url:
+                            return url.rstrip("/")
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+        time.sleep(1)
+    return tunnel_url(port)
 
 
 def start_host() -> subprocess.Popen[str]:
@@ -225,18 +244,21 @@ def main() -> int:
         return 0
 
     ensure_tunnel(port, anonymous=not args.authenticated)
-    url = tunnel_url(port)
-    print(f"[ok] Tunnel URL: {url}")
-
-    update_env({"FOUNDRY_LOCAL_TUNNEL_URL": url, "FOUNDRY_LOCAL_BACKEND_URL": f"{url}/v1"})
-    push_to_apim(url)
 
     if args.no_host:
+        url = tunnel_url(port)
+        print(f"[ok] Tunnel URL: {url}")
+        update_env({"FOUNDRY_LOCAL_TUNNEL_URL": url, "FOUNDRY_LOCAL_BACKEND_URL": f"{url}/v1"})
+        push_to_apim(url)
         print(f"\nHost it when you are ready:\n  devtunnel host {TUNNEL_ID}")
         return 0
 
     process = start_host()
     try:
+        url = wait_for_hosted_url(port)
+        print(f"[ok] Tunnel URL: {url}")
+        update_env({"FOUNDRY_LOCAL_TUNNEL_URL": url, "FOUNDRY_LOCAL_BACKEND_URL": f"{url}/v1"})
+        push_to_apim(url)
         verify(url)
         print("\nOption 4 is live. In another terminal:")
         print("  uv run python shared/client.py --option 4")

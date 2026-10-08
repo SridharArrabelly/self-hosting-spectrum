@@ -45,9 +45,9 @@ HOURLY_COST: dict[int, float] = {
     3: 0.19,   # Standard_D4s_v5
     4: 0.00,   # your own hardware
 }
-PER_MTOK_COST: dict[int, tuple[float, float]] = {
+PER_MTOK_COST: dict[int, tuple[float, float] | None] = {
     1: (0.0, 0.0),
-    2: (0.06, 0.22),  # FW-Nemotron-Lightning-3.5-30B-A3B
+    2: None,  # Fireworks catalog pricing changes; verify the current Foundry price sheet.
     3: (0.0, 0.0),
     4: (0.0, 0.0),
 }
@@ -82,11 +82,14 @@ class Result:
         total = sum(self.latencies)
         return self.completion_tokens / total if total and self.completion_tokens else float("nan")
 
-    def cost_per_1k_calls(self) -> float:
+    def cost_per_1k_calls(self) -> float | None:
         """Rough $ for 1000 calls at this measured shape."""
         if not self.latencies:
             return float("nan")
-        rate_in, rate_out = PER_MTOK_COST[self.option.number]
+        rates = PER_MTOK_COST[self.option.number]
+        if rates is None:
+            return None
+        rate_in, rate_out = rates
         token_cost = (self.prompt_tokens * rate_in + self.completion_tokens * rate_out) / 1_000_000
         per_call_tokens = token_cost / self.ok
         hourly = HOURLY_COST[self.option.number]
@@ -166,9 +169,11 @@ def render(results: list[Result]) -> None:
             print(f"{r.option.number:<3}{r.option.key:<26}{'0':<5}{'--':>9}{'--':>9}"
                   f"{'--':>9}{'--':>10}{'--':>13}")
             continue
+        cost = r.cost_per_1k_calls()
+        cost_text = "n/a" if cost is None else f"{cost:.4f}"
         print(f"{r.option.number:<3}{r.option.key:<26}{r.ok:<5}"
               f"{r.mean:>9.2f}{r.p95:>9.2f}{r.tokens_per_second:>9.1f}"
-              f"{r.completion_tokens:>10}{r.cost_per_1k_calls():>13.4f}")
+              f"{r.completion_tokens:>10}{cost_text:>13}")
 
     failed = [r for r in results if r.errors]
     if failed:

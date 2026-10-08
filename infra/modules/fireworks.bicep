@@ -24,10 +24,13 @@ param foundryAccountName string
 param deploymentName string = 'fireworks'
 
 @description('Fireworks catalog model id.')
-param modelName string = 'FW-Nemotron-Lightning-3.5-30B-A3B'
+param modelName string = 'FW-GLM-5.3-Flash'
 
 @description('Model version. Leave at 1 unless the catalog says otherwise.')
 param modelVersion string = '1'
+
+@description('Pay-as-you-go SKU supported by the selected model.')
+param skuName string = 'GlobalStandard'
 
 @description('Capacity in thousands of tokens per minute for the pay-as-you-go SKU.')
 // DataZoneStandard bills per token, so capacity is purely a rate-limit dial and
@@ -44,9 +47,9 @@ resource deployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01
   parent: account
   name: deploymentName
   sku: {
-    // DataZoneStandard is the pay-as-you-go SKU for partner models.
+    // GlobalStandard and DataZoneStandard are pay-as-you-go partner SKUs.
     // GlobalProvisionedManaged would be the PTU path - far more expensive.
-    name: 'DataZoneStandard'
+    name: skuName
     capacity: capacity
   }
   properties: {
