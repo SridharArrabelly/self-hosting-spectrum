@@ -27,6 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from openai import APIStatusError, OpenAI  # noqa: E402
+from openai.types.chat import ChatCompletion  # noqa: E402
 
 from shared.auth import describe as describe_auth  # noqa: E402
 from shared.auth import gateway_credential  # noqa: E402
@@ -80,12 +81,52 @@ def call(settings: Settings, option: Option, prompt: str, max_tokens: int, timeo
 
     started = time.perf_counter()
     try:
-        response = client.chat.completions.create(
+        raw_response = client.chat.completions.with_raw_response.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=0.2,
             extra_headers={"x-shs-model": model},
+        )
+        http_response = raw_response.http_response
+        content_type = http_response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json" and not content_type.endswith("+json"):
+            raise ValueError(
+                f"Expected chat-completion JSON, received HTTP {http_response.status_code} "
+                f"with Content-Type {content_type or '(missing)'!r}: {_short(http_response.text)}. "
+                "Check the backend and tunnel host; an HTML relay page is not a model response."
+            )
+        try:
+            response = ChatCompletion.model_validate(http_response.json())
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid chat-completion JSON (HTTP {http_response.status_code}): "
+                f"{_short(http_response.text)}"
+            ) from exc
+        if not response.choices:
+            raise ValueError("Chat-completion response contains no choices.")
+
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        usage = response.usage
+        choice = response.choices[0]
+        answer = (choice.message.content or "").strip()
+        error = ""
+        if not answer:
+            error = f"No visible answer returned (finish_reason={choice.finish_reason})."
+            if choice.finish_reason == "length":
+                error += (
+                    f" The {max_tokens}-token budget was exhausted, possibly by reasoning tokens."
+                    f" Retry with --max-tokens {max_tokens * 2}."
+                )
+        return Result(
+            option=option,
+            ok=bool(answer),
+            answer=answer,
+            latency_ms=elapsed_ms,
+            prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+            completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            model=response.model or model,
+            error=error,
         )
     except APIStatusError as exc:
         return Result(
@@ -103,18 +144,6 @@ def call(settings: Settings, option: Option, prompt: str, max_tokens: int, timeo
             model=model,
             error=f"{type(exc).__name__}: {exc}",
         )
-
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    usage = response.usage
-    return Result(
-        option=option,
-        ok=True,
-        answer=(response.choices[0].message.content or "").strip(),
-        latency_ms=elapsed_ms,
-        prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
-        completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
-        model=response.model or model,
-    )
 
 
 def _short(text: str, limit: int = 300) -> str:
@@ -169,7 +198,10 @@ def main() -> int:
     group.add_argument("--option", type=int, choices=sorted(OPTIONS), help="Which hosting option to call.")
     group.add_argument("--all", action="store_true", help="Call all four in sequence and compare.")
     parser.add_argument("--prompt", default=DEFAULT_PROMPT, help="The question to ask.")
-    parser.add_argument("--max-tokens", type=int, default=512, help="Response length cap.")
+    parser.add_argument(
+        "--max-tokens", type=int, default=2048,
+        help="Output token cap, including reasoning tokens (default: 2048).",
+    )
     parser.add_argument("--timeout", type=float, default=180.0, help="Per-request timeout in seconds.")
     parser.add_argument("--verbose", action="store_true", help="Show per-option notes on failure.")
     args = parser.parse_args()

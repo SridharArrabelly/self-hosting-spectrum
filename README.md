@@ -443,6 +443,35 @@ az vm run-command invoke -g rg-self-hosting-spectrum -n vm-inference-shs01 `
   --command-id RunShellScript --scripts "curl -s localhost:11434/v1/models"
 ```
 
+
+#### Optional remote desktop access
+
+Option 3 runs **Ubuntu**, not Windows. It is provisioned with an SSH public key, so there is no initial
+password to retrieve. For an optional graphical administration session, install XFCE and xrdp:
+
+```powershell
+az vm run-command invoke -g rg-self-hosting-spectrum -n vm-inference-shs01 `
+  --command-id RunShellScript --scripts 'set -eu; export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l; apt-get update -qq; apt-get install -y -qq --no-install-recommends xfce4 xfce4-terminal xrdp xorgxrdp dbus-x11; adduser xrdp ssl-cert; echo startxfce4 > /home/azureuser/.xsession; chown azureuser:azureuser /home/azureuser/.xsession; chmod 600 /home/azureuser/.xsession; systemctl enable xrdp; systemctl restart xrdp'
+
+# Restrict RDP to your current public IP, never 0.0.0.0/0.
+$adminIp = (Invoke-RestMethod -Uri ("https://api.ipify.org?nocache=" + [guid]::NewGuid())).Trim()
+az network nsg rule create -g rg-self-hosting-spectrum --nsg-name nsg-inference-shs01 `
+  -n allow-rdp-admin --priority 110 --direction Inbound --access Allow --protocol Tcp `
+  --source-address-prefixes "$adminIp/32" --source-port-ranges '*' `
+  --destination-address-prefixes '*' --destination-port-ranges 3389
+```
+
+If you changed the deployment's admin username, replace `azureuser` in the desktop setup command.
+Set a password yourself through **Azure Portal > VM > Help > Reset password**, selecting **Reset password**
+for your existing admin user. Do not put passwords in scripts, `.env`, or Git. Open Windows **Remote Desktop
+Connection**, connect to the VM's public DNS name on port `3389`, select **Xorg** at the xrdp login screen,
+and use that username and the password you just set. This is local Linux account authentication, not Entra login.
+
+This optional setup is applied to the existing VM, not enabled by the default Bicep deployment. Recreating
+the VM or redeploying its NSG can require reapplying it. Update the IP restriction if your public IP changes.
+For production, prefer private administration through VPN or an appropriately configured Azure Bastion.
+
+
 ---
 
 ### Option 4 — Foundry Local
@@ -524,9 +553,9 @@ The tunnel is **persistent and named** (`shs-foundry-local`) so its URL survives
 that URL into the APIM named value `foundry-local-backend-url` — so re-pointing the gateway at a new tunnel is
 one command, not a redeployment.
 
-> `devtunnel show <id>` takes **`-j` / `--json`** (not `-o json`), and its JSON does **not** contain the public
-> URL. The URL is derived from the tunnel id, which embeds the cluster: `shs-foundry-local.inc1` +
-> port `39839` → `https://shs-foundry-local-39839.inc1.devtunnels.ms`. `tunnel.py` does this for you.
+> `devtunnel show <id>` takes **`-j` / `--json`** (not `-o json`). Use the hosted port's **`portUri`**
+> as the authoritative public URL; it can contain an opaque hostname, so do not derive it from the tunnel id.
+> `tunnel.py` discovers the URL and updates APIM automatically. Wait for **`Option 4 is live`** before calling the client.
 
 > Dev Tunnels serve an **anti-phishing interstitial** to browser-shaped requests, which returns HTML where your
 > client expects JSON. `infra/policies/foundry-local.xml` sets `X-Tunnel-Skip-AntiPhishing-Page: true` at the
@@ -1024,6 +1053,7 @@ account** — without that the name stays reserved for 48 hours and the next dep
 | Option 3 returns`HTTP 500` after ~25s                                                | NSG uses the`ApiManagement` service tag, which does not cover gateway→backend traffic.                                                                                                                  | Allow APIM's`outboundIpAddresses` explicitly (§5, Option 3).                                                                                                                                                                     |
 | Option 3 returns`500` immediately, VM looks healthy                                  | `ollama pull` ran under cloud-init with no `$HOME` and panicked. The daemon is up and listening but serving **no model**.                                                                        | `export HOME=/root` before `ollama pull`. Already fixed in `cloud-init.yaml`.                                                                                                                                                 |
 | Option 4 returns`400 "Model … is not loaded"`                                       | The model is cached but not resident.                                                                                                                                                                      | `foundry model load <variant>`; `bootstrap.py` does this.                                                                                                                                                                       |
+| Option 4 returns `404` or non-JSON instead of a completion | The tunnel host is offline, its URL is stale, or the relay returned an HTML page. | Run `uv run python 04-foundry-local/bootstrap.py`, then `uv run python 04-foundry-local/tunnel.py` in a separate terminal. Wait for `Option 4 is live` and leave it running. The client reports invalid response bodies as failures, not Python tracebacks. |
 | Option 4 returns HTML                                                                  | Dev Tunnels anti-phishing interstitial.                                                                                                                                                                    | `X-Tunnel-Skip-AntiPhishing-Page: true`, set in the route policy.                                                                                                                                                                 |
 | `UnicodeDecodeError` running `bootstrap.py`                                        | The`foundry` CLI draws box-art tables; Windows subprocesses default to cp1252.                                                                                                                           | Capture subprocess output as UTF-8 with`errors="replace"`.                                                                                                                                                                        |
 | Policy deploy fails with`'key' start tag … does not match`                          | A literal`<` in policy text content.                                                                                                                                                                     | Escape it (§6).                                                                                                                                                                                                                    |
@@ -1031,7 +1061,7 @@ account** — without that the name stays reserved for 48 hours and the next dep
 | Managed compute:`no default deployment template`                                     | That model has no`AllowedDeploymentTemplates` — most `azureml`-registry models are serverless-only.                                                                                                   | Use an`azure-huggingface` model that has one.                                                                                                                                                                                     |
 | Managed compute:`RequestConflict: Another operation is in progress`                  | You tried to delete a deployment that is still`Creating`.                                                                                                                                                | Wait for a terminal state, then delete.                                                                                                                                                                                             |
 | Fireworks deploy fails                                                                 | `Fireworks.EnableDeploy` not registered, or a PTU-only model.                                                                                                                                            | `preflight.py` registers the flag (~30 min); use `list_models.py` to pick a pay-as-you-go model.                                                                                                                                |
-| Fireworks answer is truncated mid-reasoning                                            | It is a reasoning model that emits its chain of thought.                                                                                                                                                   | Raise`--max-tokens` (client default is 512).                                                                                                                                                                                      |
+| Fireworks answer is blank or truncated                                            | Reasoning tokens consume the same output budget as the final answer; the model can exhaust it before returning visible content.                                                                                                                                                   | Raise`--max-tokens` (client default is 2048, including reasoning tokens).                                                                                                                                                                                      |
 | Fireworks returns`429 RateLimitReached` on back-to-back calls                        | Deployment`sku.capacity` of 1 means 1 request/min. It is a Fireworks-side throttle, not APIM.                                                                                                            | Raise`capacity` (billing is per-token, so this is free), or use `benchmark.py --pause`.                                                                                                                                         |
 | Agent fails with`Model gateway error: Upstream gateway returned NotFound`            | Foundry probes`GET <target>/deployments/<model>` before forwarding, and the route has no such operation.                                                                                                 | Publish the probe operation (§7). Confirm in App Insights, not from the error text.                                                                                                                                                |
 | Agent fails with`Failed to parse deployment response … from provider 'AzureOpenAI'` | The probe answered, but with the flat data-plane shape instead of the ARM envelope.                                                                                                                        | Return`name` / `properties.model` / `sku` too (§7).                                                                                                                                                                          |
